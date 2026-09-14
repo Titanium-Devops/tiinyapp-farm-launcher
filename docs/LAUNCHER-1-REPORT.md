@@ -160,6 +160,14 @@ memory, so a change to the engine's words turns the tests red.
 There is no byte-level percentage, because the engine does not print one. The bar
 moves in five steps, and the words beside it are the engine's own.
 
+One detail about the Open button. The design asks for
+`http://127.0.0.1:<port>`; what the launcher opens is the link the engine gives
+it, which is `http://localhost:<port>` plus the app's own landing path when its
+manifest names one. They are the same address, and taking the engine's link
+means an app that says it opens at `/show` opens at `/show`. The launcher will
+hand the system opener nothing else: only a loopback address or the farm's own
+site, checked before it goes.
+
 ### 2.5 macOS Local Network privacy, and the launcher
 
 This is the one finding worth reading twice.
