@@ -3,11 +3,14 @@
 Every one of these is the launcher's own window, captured by window id rather
 than by screen region, so nothing else that happened to be on the screen is in
 them. Taken on a MacBook Pro (Apple M5 Max, macOS 26.6.2) on 2026-09-14 from the
-ad hoc signed 0.1.0 build, engine farm 0.1.13, against Jason's Tiiny at 172.17.7.177, with the
-engine pointed at a scratch home so nothing of his was touched.
+ad hoc signed 0.1.0 build against Jason's Tiiny at 172.17.7.177, with the engine
+pointed at a scratch home so nothing of his was touched. Pictures 01 to 15 were
+taken against engine farm 0.1.13, and 16 to 23 against farm 0.1.14.
 
-The window is 1100 by 720 points in all of them except the last, which is the
-smallest size the launcher allows.
+The window is 1100 by 720 points in all of them except `10-smallest-size.png`
+and `12-smallest-first-run.png`, which are the smallest size the launcher
+allows, and `09-the-tray.png` and `22-tray-lost-model.png`, which are the menu
+bar menu rather than the window.
 
 | Picture | What it shows |
 | --- | --- |
@@ -26,6 +29,14 @@ smallest size the launcher allows.
 | `14-app-window-story-lantern.png` | Story Lantern in its own window. |
 | `15-app-window-tiiny-bot.png` | Titanium Tiiny Bot in its own window. |
 | `11-the-log.png` | A stopped app's own `farm.log`. The Tiiny's hardware serial is blacked out; it is the device's, not the launcher's, and it does not need to travel in a public repository. |
+| `16-models-loaded.png` | The Models pane. What the Tiiny has loaded right now, with the kind, the cost in NPU units and the state on each, and the unit budget above them: 32 of 100 free, drawn as a bar. |
+| `17-models-on-disk.png` | The rest of the same pane: everything downloaded and not loaded. Each row carries a Load button, and each model that costs more than the Tiiny has free says how much more. The buttons are all disabled in this build, because farm 0.1.14 can load a model only as part of starting an app that needs it. |
+| `18-card-needs-met.png` | Daybreak's card with the chat model loaded. The needs line is one chip per kind, green because it is there, and the Better with line underneath carries the three kinds the app prefers: embedding and image are loaded, rerank is not, and none of them stops it starting. |
+| `19-card-needs-unmet.png` | The same card 4 seconds after the chat model was stopped on the Tiiny. Nobody touched the window: the chip went red and the sentence underneath says what is missing, in words. |
+| `20-running-needs-unmet.png` | The Running pane in the same state. Daybreak and Titanium Tiiny Bot have a greyed Start with the reason beside it and a Load and start button next to it. Story Lantern is still running and carries the badge saying the model it was using is not loaded any more. |
+| `21-load-and-start-refused.png` | What Load and start does on farm 0.1.14. The engine answers a JSON start with the missing kinds before it tries to load anything, so the load never happens, and the panel says exactly that rather than leaving somebody pressing the button twice. |
+| `22-tray-lost-model.png` | The menu bar in the same state: `story-lantern  port 8421  no chat model loaded`. The suffix disappears on its own when the model comes back. |
+| `23-needs-met-again.png` | The Running pane 2 seconds after the chat model was loaded again. Every refusal, badge and Load and start button has gone, and Start is live. The Tiiny was left with the same four models loaded, the same 68 of 100 units used and the same 16 models on disk it had before any of this. |
 
 Three serials are blacked out, in `01`, `11` and `12`. They identify one person's
 device, they are not something the launcher handles, and they do not need to

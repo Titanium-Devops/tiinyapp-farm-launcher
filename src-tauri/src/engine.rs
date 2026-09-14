@@ -210,6 +210,38 @@ impl Engine {
         command
     }
 
+    /// Start a command that keeps printing and hand back the child, so the
+    /// caller can stop it. `on_line` is called with each line of standard
+    /// output as it arrives, which is where a watch's changes come from: a
+    /// watch has no single answer, so the usual "one object on stdout" reading
+    /// would wait for an end that never comes.
+    pub fn spawn_streaming<F>(&self, args: &[&str], mut on_line: F) -> Result<Child, EngineError>
+    where
+        F: FnMut(&str) + Send + 'static,
+    {
+        self.pin_interpreter();
+        let mut child = self.command(args).spawn().map_err(|error| {
+            EngineError::plain(format!("The farm could not be started: {error}."))
+        })?;
+        let out = child.stdout.take().expect("stdout is piped");
+        std::thread::spawn(move || {
+            for line in BufReader::new(out).lines().map_while(Result::ok) {
+                on_line(&line);
+            }
+        });
+        // Standard error is the running commentary, and a watch's commentary is
+        // one line about how often it looks. Drained so a full pipe can never
+        // wedge the child.
+        if let Some(err) = child.stderr.take() {
+            std::thread::spawn(
+                move || {
+                    for _ in BufReader::new(err).lines().map_while(Result::ok) {}
+                },
+            );
+        }
+        Ok(child)
+    }
+
     /// Run a `--json` command and hand back the object it answered with.
     pub fn json(&self, args: &[&str], budget: Budget) -> Result<Value, EngineError> {
         self.json_watching(args, budget, |_| {})

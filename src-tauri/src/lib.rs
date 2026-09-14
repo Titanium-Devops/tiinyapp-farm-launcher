@@ -7,6 +7,7 @@
 pub mod appwindow;
 pub mod catalog;
 pub mod engine;
+pub mod models;
 pub mod progress;
 pub mod settings;
 pub mod state;
@@ -14,7 +15,8 @@ pub mod tray;
 pub mod trouble;
 
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -32,6 +34,115 @@ pub struct Launcher {
     /// An app id handed to the launcher by a `tiinyfarm://install/<id>` link
     /// before the window was ready to hear about it.
     pub pending_deep_link: Mutex<Option<String>>,
+    /// The one `farm models --watch` child, while the window is open.
+    pub watch: Watch,
+    /// What the Tiiny had loaded when it was last asked, kept up to date by the
+    /// watch. One snapshot, so the window and the buttons never disagree.
+    pub snapshot: Mutex<Option<models::Snapshot>>,
+}
+
+/// One watch on the Tiiny's models, kept alive while the window is open.
+///
+/// The device is polled by the engine every three seconds, so this is a child
+/// process rather than a timer here, and there is exactly one of it: two
+/// watches would be two conversations with the same device and twice the
+/// traffic for the same answer. It is stopped when the window is put away,
+/// because a window nobody is looking at has no reason to keep asking.
+#[derive(Default)]
+pub struct Watch {
+    running: Arc<AtomicBool>,
+    child: Arc<Mutex<Option<std::process::Child>>>,
+}
+
+impl Watch {
+    /// Start watching, if it is not already. Safe to call again.
+    pub fn start(&self, app: &tauri::AppHandle) {
+        if self.running.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let running = self.running.clone();
+        let held = self.child.clone();
+        let handle = app.clone();
+        std::thread::spawn(move || {
+            while running.load(Ordering::SeqCst) {
+                let engine = handle.state::<Launcher>().engine.clone();
+                let reporter = handle.clone();
+                let spawned = engine.spawn_streaming(
+                    // --json, or the watch prints the sentences a person
+                    // reads and the window hears nothing it can use.
+                    &["models", "--watch", "--interval", "3", "--json"],
+                    move |line| match models::read_watch_line(line) {
+                        Some(models::Watched::Changed(change)) => {
+                            // The held snapshot is what the window and the
+                            // buttons read, so the change lands in it before
+                            // anything is told to look again. Without this the
+                            // window asks a snapshot that never moved and a
+                            // model coming or going is invisible until the
+                            // whole device is read afresh.
+                            models::fold(&reporter.state::<Launcher>().snapshot, &change);
+                            let _ = reporter.emit("models:change", *change);
+                            // The menu bar says which running app lost its
+                            // model, and it only knows because it asks the
+                            // engine again. Nothing else would make it.
+                            tray::refresh(&reporter);
+                        }
+                        Some(models::Watched::Failed(said)) => {
+                            let _ = reporter.emit("models:trouble", said);
+                        }
+                        None => {}
+                    },
+                );
+                match spawned {
+                    Ok(child) => {
+                        if let Ok(mut slot) = held.lock() {
+                            *slot = Some(child);
+                        }
+                        // Wait for it to end, however it ends.
+                        loop {
+                            std::thread::sleep(std::time::Duration::from_millis(300));
+                            if !running.load(Ordering::SeqCst) {
+                                break;
+                            }
+                            let done = held
+                                .lock()
+                                .ok()
+                                .and_then(|mut slot| slot.as_mut().map(|child| child.try_wait()));
+                            match done {
+                                Some(Ok(Some(_))) | Some(Err(_)) | None => break,
+                                Some(Ok(None)) => {}
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        let _ = handle.emit("models:trouble", error.message);
+                    }
+                }
+                if !running.load(Ordering::SeqCst) {
+                    break;
+                }
+                // A watch that died is restarted, after a pause, so a device
+                // that went away does not become a spawn loop.
+                std::thread::sleep(std::time::Duration::from_secs(2));
+            }
+            if let Ok(mut slot) = held.lock() {
+                if let Some(mut child) = slot.take() {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                }
+            }
+        });
+    }
+
+    /// Stop watching. The child is killed rather than left to notice.
+    pub fn stop(&self) {
+        self.running.store(false, Ordering::SeqCst);
+        if let Ok(mut slot) = self.child.lock() {
+            if let Some(mut child) = slot.take() {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+        }
+    }
 }
 
 type Answer<T> = Result<T, EngineError>;
@@ -112,6 +223,111 @@ async fn farm_doctor(app: tauri::AppHandle) -> Answer<Value> {
     on_engine(app, |engine| engine.json(&["doctor"], Budget::PATIENT)).await
 }
 
+/// What the Tiiny has loaded and what is on its disk, and what that means for
+/// each app in one answer.
+///
+/// One call rather than one per app, and the deciding happens here rather than
+/// in the page, because the page having its own opinion about whether a need is
+/// met is how a window ends up disagreeing with the engine it is a face on.
+#[tauri::command]
+async fn farm_models(app: tauri::AppHandle, apps: Option<Vec<AppNeeds>>) -> Answer<Value> {
+    let answer = on_engine(app.clone(), |engine| {
+        engine.json(&["models"], Budget::PATIENT)
+    })
+    .await?;
+    let snapshot = models::Snapshot::read(&answer);
+    if let Ok(mut held) = app.state::<Launcher>().snapshot.lock() {
+        *held = snapshot.clone();
+    }
+    Ok(json!({
+        "models": answer,
+        "needs": decide(apps.unwrap_or_default(), snapshot.as_ref()),
+    }))
+}
+
+/// The needs of every app, against the snapshot already held, with no call to
+/// the device at all. This is what a watch event leads to.
+#[tauri::command]
+fn app_needs(app: tauri::AppHandle, apps: Vec<AppNeeds>) -> Value {
+    let held = app
+        .state::<Launcher>()
+        .snapshot
+        .lock()
+        .ok()
+        .and_then(|held| held.clone());
+    json!({
+        "models": held,
+        "needs": decide(apps, held.as_ref()),
+    })
+}
+
+/// What one app declares it needs, as the window read it off the manifest.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppNeeds {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub needs: Vec<String>,
+    #[serde(default)]
+    pub prefers: Vec<String>,
+}
+
+fn decide(apps: Vec<AppNeeds>, snapshot: Option<&models::Snapshot>) -> Value {
+    let mut out = serde_json::Map::new();
+    for app in apps {
+        let needs = models::needs_of(&app.needs, snapshot);
+        let prefers: Vec<Value> = app
+            .prefers
+            .iter()
+            .map(|kind| {
+                json!({
+                    "kind": kind,
+                    "loaded": snapshot.map(|state| state.meeting(kind).is_some()),
+                })
+            })
+            .collect();
+        let met: Vec<Value> = app
+            .needs
+            .iter()
+            .map(|kind| {
+                json!({
+                    "kind": kind,
+                    "loaded": snapshot.map(|state| state.meeting(kind).is_some()),
+                })
+            })
+            .collect();
+        out.insert(
+            app.id.clone(),
+            json!({
+                "needs": met,
+                "prefers": prefers,
+                "state": needs,
+                "canStart": needs.can_start(),
+                "canLoadAndStart": needs.can_load_and_start(),
+                "sentence": needs.sentence(&app.name),
+            }),
+        );
+    }
+    Value::Object(out)
+}
+
+// There is deliberately no command here for loading one named model. farm
+// 0.1.14 can load a model only as part of starting an app that needs it
+// (`farm start --load`), and the launcher will not reach past the engine to the
+// device to do it another way: one idea of what loading means, or the window
+// and the command line stop agreeing. The Models pane shows what is on disk and
+// what it would cost, and says why its Load button is not live yet. See
+// docs/LAUNCHER-2-REPORT.md.
+
+/// Start watching the device's models, or leave the watch that is already
+/// running alone.
+#[tauri::command]
+fn models_watch(app: tauri::AppHandle) {
+    let handle = app.clone();
+    app.state::<Launcher>().watch.start(&handle);
+}
+
 #[tauri::command]
 async fn farm_manifest(id: String) -> Result<Value, String> {
     catalog::manifest(&id).await
@@ -188,11 +404,20 @@ async fn work(app: tauri::AppHandle, id: String, verb: &'static str) -> Answer<V
 }
 
 #[tauri::command]
-async fn farm_start(app: tauri::AppHandle, id: String, port: Option<u16>) -> Answer<Value> {
+async fn farm_start(
+    app: tauri::AppHandle,
+    id: String,
+    port: Option<u16>,
+    load: Option<bool>,
+) -> Answer<Value> {
     let answer = on_engine(app.clone(), move |engine| {
         let port = port.map(|p| p.to_string());
         let ours = engine.python.to_string_lossy().to_string();
         let mut args: Vec<&str> = vec!["start", &id];
+        // --load is only ever here because somebody pressed Load and start.
+        if load.unwrap_or(false) {
+            args.push("--load");
+        }
         if let Some(port) = &port {
             args.push("--port");
             args.push(port);
@@ -205,8 +430,16 @@ async fn farm_start(app: tauri::AppHandle, id: String, port: Option<u16>) -> Ans
         args.push("--python");
         args.push(&ours);
         // The engine waits for readiness itself, up to its ten second ceiling,
-        // so the budget only has to cover that plus the work around it.
-        engine.json(&args, Budget::PATIENT)
+        // so the budget only has to cover that plus the work around it. A start
+        // that loads a model first waits for the device, which is minutes.
+        engine.json(
+            &args,
+            if load.unwrap_or(false) {
+                Budget::DOWNLOAD
+            } else {
+                Budget::PATIENT
+            },
+        )
     })
     .await?;
     let _ = app.emit("apps:changed", ());
@@ -558,6 +791,9 @@ pub fn raise(app: &tauri::AppHandle) {
         let _ = window.show();
         let _ = window.unminimize();
         let _ = window.set_focus();
+        // The window is back, so the watch comes back with it.
+        let handle = app.clone();
+        app.state::<Launcher>().watch.start(&handle);
     }
 }
 
@@ -624,6 +860,9 @@ pub fn run() {
             farm_check,
             farm_doctor,
             farm_manifest,
+            farm_models,
+            app_needs,
+            models_watch,
             device_find,
             farm_install,
             farm_update,
@@ -660,6 +899,8 @@ pub fn run() {
                 settings: Mutex::new(held.clone()),
                 frames: Mutex::new(frames),
                 pending_deep_link: Mutex::new(None),
+                watch: Watch::default(),
+                snapshot: Mutex::new(None),
             });
             apply_autostart(&handle, held.autostart);
 
@@ -698,18 +939,31 @@ pub fn run() {
             // the launcher either: the tray is still there, and the apps are
             // still running.
             let hide = window.clone();
+            let watching = handle.clone();
             window.on_window_event(move |event| {
                 if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                     api.prevent_close();
                     let _ = hide.hide();
+                    // A window nobody is looking at has no reason to keep
+                    // asking the Tiiny what it has loaded.
+                    watching.state::<Launcher>().watch.stop();
                 }
             });
+            app.state::<Launcher>().watch.start(&handle);
 
             tray::build(&handle)?;
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("the launcher could not start");
+        .build(tauri::generate_context!())
+        .expect("the launcher could not start")
+        .run(|handle, event| {
+            // Quitting takes the watch with it. Without this the interpreter
+            // the watch runs in outlives the launcher and keeps asking the
+            // Tiiny what it has loaded, for ever.
+            if matches!(event, tauri::RunEvent::Exit) {
+                handle.state::<Launcher>().watch.stop();
+            }
+        });
 }
 
 #[cfg(test)]

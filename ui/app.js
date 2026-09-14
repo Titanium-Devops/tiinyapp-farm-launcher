@@ -28,6 +28,9 @@ const farm = {
   running: [],
   manifests: new Map(),
   working: new Map(), // id -> { phase, line, fraction }
+  device_models: null,   // the last snapshot of what the Tiiny has loaded
+  needs: {},             // id -> what that means for one app, decided in Rust
+  modelsTrouble: null,   // what the watch said when it could not look
   trouble: new Map(), // id -> { message, commentary }
   open: null,
 };
@@ -64,7 +67,7 @@ async function reread(force) {
 }
 
 function show(view) {
-  for (const name of ["farm", "running", "settings"]) {
+  for (const name of ["farm", "running", "models", "settings"]) {
     $(`view-${name}`).hidden = name !== view;
     document.querySelector(`nav button[data-view="${name}"]`).setAttribute("aria-pressed", String(name === view));
   }
@@ -150,6 +153,17 @@ function renderInstalled() {
       facts.append(el("span", { text: "Stopped" }));
     }
     if (row.updateAvailable) facts.append(el("span", { text: `Update ${row.updateAvailable} is ready` }));
+    // A running app whose model went away underneath it. The engine works out
+    // that it is gone and since when; this only says so.
+    const lost = live && live.models && live.models.unmet && live.models.unmet.length
+      ? live.models : null;
+    if (lost) {
+      facts.append(el("span", { class: "chip bad", text: lostSentence(row, lost) }));
+    }
+    const need = farm.needs[row.id];
+    if (!live && need && !need.canStart) {
+      facts.append(el("span", { class: "chip bad", text: need.sentence }));
+    }
     if (bad) facts.append(el("span", { text: bad.message }));
 
     const actions = el("div", { class: "act" });
@@ -161,8 +175,17 @@ function renderInstalled() {
       actions.append(el("button", { class: "btn ghost small", type: "button", onclick: () => stop(row.id) }, document.createTextNode("Stop")));
     } else {
       const runnable = !manifest || manifest.entry !== null;
-      if (runnable) actions.append(el("button", { class: "btn small", type: "button", onclick: () => start(row.id) }, document.createTextNode("Start")));
-      else actions.append(el("span", { class: "chip", text: "A library, nothing to start" }));
+      if (runnable && need && !need.canStart) {
+        actions.append(el("button", { class: "btn small", type: "button", disabled: true }, document.createTextNode("Start")));
+        if (need.canLoadAndStart) {
+          actions.append(el("button", { class: "btn small", type: "button", onclick: () => start(row.id, undefined, true) },
+            document.createTextNode("Load and start")));
+        }
+      } else if (runnable) {
+        actions.append(el("button", { class: "btn small", type: "button", onclick: () => start(row.id) }, document.createTextNode("Start")));
+      } else {
+        actions.append(el("span", { class: "chip", text: "A library, nothing to start" }));
+      }
     }
     if (row.updateAvailable && !working) {
       actions.append(el("button", { class: "btn ghost small", type: "button", onclick: () => update(row.id) }, document.createTextNode("Update")));
@@ -297,6 +320,8 @@ function renderCardState() {
     actions.append(el("span", { class: "chip", text: working.line }));
     return;
   }
+  renderCardModels(id);
+
   if (!installedRow) {
     const row = farm.catalog.find((r) => r.id === id) || {};
     const plantable = row.release === "ready";
@@ -309,7 +334,16 @@ function renderCardState() {
     actions.append(el("button", { class: "btn quiet", type: "button", onclick: () => openInBrowser(id) }, document.createTextNode("In browser")));
     actions.append(el("button", { class: "btn ghost", type: "button", onclick: () => stop(id) }, document.createTextNode("Stop")));
   } else if (!manifest || manifest.entry !== null) {
-    actions.append(el("button", { class: "btn", type: "button", onclick: () => start(id) }, document.createTextNode("Start")));
+    const need = farm.needs[id];
+    if (need && !need.canStart) {
+      actions.append(el("button", { class: "btn", type: "button", disabled: true }, document.createTextNode("Start")));
+      if (need.canLoadAndStart) {
+        actions.append(el("button", { class: "btn", type: "button", onclick: () => start(id, undefined, true) },
+          document.createTextNode("Load and start")));
+      }
+    } else {
+      actions.append(el("button", { class: "btn", type: "button", onclick: () => start(id) }, document.createTextNode("Start")));
+    }
   } else {
     actions.append(el("span", { class: "chip", text: "A library, so there is nothing to start" }));
   }
@@ -318,6 +352,39 @@ function renderCardState() {
       document.createTextNode(`Update to ${installedRow.updateAvailable}`)));
   }
   actions.append(el("button", { class: "btn quiet", type: "button", onclick: () => remove(id) }, document.createTextNode("Remove")));
+}
+
+// What one app needs, drawn from the decision Rust made.
+function renderCardModels(id) {
+  const need = farm.needs[id];
+  const box = $("card-models");
+  if (!need || (!need.needs.length && !need.prefers.length)) {
+    box.hidden = true;
+    return;
+  }
+  box.hidden = false;
+  const kinds = $("card-model-kinds");
+  kinds.replaceChildren();
+  for (const row of need.needs) {
+    kinds.append(el("span", {
+      class: `chip ${row.loaded === true ? "ok" : row.loaded === false ? "bad" : ""}`,
+      text: row.loaded === true ? `${row.kind}, loaded`
+        : row.loaded === false ? `${row.kind}, not loaded`
+        : `${row.kind}`,
+    }));
+  }
+  const prefers = $("card-model-prefers");
+  prefers.replaceChildren();
+  if (need.prefers.length) {
+    prefers.append(el("span", { class: "chip", text: "Better with" }));
+    for (const row of need.prefers) {
+      prefers.append(el("span", {
+        class: `chip ${row.loaded === true ? "ok" : ""}`,
+        text: row.loaded === true ? `${row.kind}, loaded` : `${row.kind}`,
+      }));
+    }
+  }
+  $("card-model-sentence").textContent = need.sentence || "";
 }
 
 // Failure, in words -------------------------------------------------------
@@ -368,12 +435,29 @@ async function update(id) {
   }
 }
 
-async function start(id, port) {
+async function start(id, port, load) {
   farm.trouble.delete(id);
-  farm.working.set(id, { line: "Starting", fraction: 0.5 });
+  farm.working.set(id, { line: load ? "Loading what it needs, then starting" : "Starting", fraction: 0.5 });
   renderCardState(); renderInstalled();
   try {
-    const answer = await invoke("farm_start", { id, port: port ?? null });
+    const answer = await invoke("farm_start", { id, port: port ?? null, load: load ?? false });
+    // The engine refuses rather than failing when a model is missing, so a
+    // refusal is an answer and not an error.
+    if (answer.started === false) {
+      const kinds = (answer.missing || []).map((row) => row.kind).join(" and ");
+      let said = `${nameOf(id)} needs ${kinds} on your Tiiny, and it is not loaded.`;
+      if (load) {
+        // farm 0.1.14 answers a --json start with the missing kinds before it
+        // ever tries to load one, so --load does nothing on this path. Saying
+        // that is better than leaving somebody pressing a button twice.
+        said += " The farm was asked to load it and did not: farm 0.1.14 answers this in JSON before it tries, so Load and start cannot work until the engine is fixed.";
+      }
+      readTrouble(id, { message: said });
+      const held = farm.trouble.get(id);
+      if (held) held.aboutModels = true;
+      await readModels(true);
+      return;
+    }
     say(answer.already ? `${nameOf(id)} was already running.` : `${nameOf(id)} is running on port ${answer.port}.`);
   } catch (error) {
     readTrouble(id, error);
@@ -556,6 +640,128 @@ $("settings-device-change").addEventListener("click", () => {
 });
 $("catalog-retry").addEventListener("click", () => refresh());
 
+// The words for a running app whose model went away. The engine says which
+// kinds are unmet and which model was meeting each when the app started, so
+// this names the one that went rather than saying something went.
+function lostSentence(row, models) {
+  const kinds = models.unmet || [];
+  const gone = Object.values(models.lost || {});
+  const name = row.name || row.id;
+  if (gone.length) {
+    return `${name} was using ${gone.join(" and ")}, and it is not loaded any more`;
+  }
+  return kinds.length === 1
+    ? `${name} needs a ${kinds[0]} model and none is loaded`
+    : `${name} needs ${kinds.join(" and ")} models and they are not loaded`;
+}
+
+// Models -------------------------------------------------------------------
+// The engine watches the Tiiny and says what changed; the deciding about what
+// that means for an app happens in Rust. Nothing here works any of it out.
+
+function appNeedsList() {
+  return farm.installed.map((row) => {
+    const manifest = farm.manifests.get(row.id) || {};
+    const device = (manifest.requires || {}).device || {};
+    return {
+      id: row.id,
+      name: row.name || manifest.name || row.id,
+      needs: device.models || [],
+      prefers: device.prefers || [],
+    };
+  });
+}
+
+async function readModels(fromWatch) {
+  try {
+    const answer = fromWatch
+      ? await invoke("app_needs", { apps: appNeedsList() })
+      : await invoke("farm_models", { apps: appNeedsList() });
+    farm.device_models = fromWatch ? answer.models : answer.models;
+    farm.needs = answer.needs || {};
+    farm.modelsTrouble = null;
+    // A refusal about a missing model is not true any more once the model is
+    // there, so it goes rather than sitting under a row of green chips.
+    for (const [id, bad] of [...farm.trouble]) {
+      if (bad.aboutModels && (farm.needs[id] || {}).canStart) farm.trouble.delete(id);
+    }
+  } catch (error) {
+    farm.modelsTrouble = sentence(error);
+  }
+  renderModels();
+  renderInstalled();
+  if (farm.open) renderCardState();
+}
+
+function units(n) {
+  if (n === null || n === undefined) return "cost unknown";
+  return n === 1 ? "1 NPU unit" : `${n} NPU units`;
+}
+
+function modelRow(row, loaded, free) {
+  // A model that costs more than the Tiiny has left cannot be loaded at all,
+  // whatever the engine grows the ability to do, so the row says so.
+  const short = !loaded && row.units !== null && row.units !== undefined
+    && free !== null && free !== undefined && row.units > free
+    ? row.units - free
+    : 0;
+  const facts = el("div", { class: "m" },
+    el("span", { text: row.kind || row.capability || "kind unknown" }),
+    el("span", { text: units(row.units) }),
+    loaded && row.state ? el("span", { text: row.state }) : null,
+    short ? el("span", { class: "over", text: `${short} more than are free` }) : null);
+  const act = el("div", { class: "act" });
+  if (!loaded) {
+    // The engine can load a model only as part of starting an app that needs
+    // it. Saying so is better than a button that cannot work.
+    act.append(el("button", { class: "btn small", type: "button", disabled: true,
+      title: short
+        ? `Only ${free} of the Tiiny's NPU units are free and this one costs ${row.units}`
+        : "farm 0.1.14 loads a model as part of starting an app that needs it" },
+      document.createTextNode("Load")));
+  }
+  return el("div", { class: "approw" },
+    el("img", { src: "farm-mark.png", alt: "" }),
+    el("div", {}, el("div", { class: "n", text: row.id }), facts),
+    act);
+}
+
+function renderModels() {
+  const npu = (farm.device_models || {}).npu || {};
+  const line = $("npu-line");
+  if (farm.modelsTrouble) {
+    line.textContent = farm.modelsTrouble;
+    $("npu-bar").style.width = "0%";
+  } else if (npu.total === null || npu.total === undefined) {
+    line.textContent = "Your Tiiny did not say how many NPU units it has.";
+    $("npu-bar").style.width = "0%";
+  } else {
+    line.textContent = `${npu.available} of ${npu.total} free. A model stays resident while it is loaded, and its units are what that costs.`;
+    $("npu-bar").style.width = `${Math.round(((npu.used || 0) / npu.total) * 100)}%`;
+  }
+
+  const loaded = ((farm.device_models || {}).loaded) || [];
+  const disk = ((farm.device_models || {}).downloaded) || [];
+  const box = $("models-loaded");
+  box.replaceChildren();
+  $("models-loaded-empty").hidden = loaded.length > 0;
+  for (const row of loaded) box.append(modelRow(row, true));
+
+  const diskBox = $("models-disk");
+  diskBox.replaceChildren();
+  $("models-disk-note").textContent = disk.length
+    ? "These are downloaded and cost nothing until they are loaded. The farm loads one as part of starting an app that needs it, which is the Load and start button on the app."
+    : "Nothing else is downloaded. TiinyOS is where a model is downloaded.";
+  for (const row of disk) diskBox.append(modelRow(row, false, npu.available));
+}
+
+// A model changing on the Tiiny arrives here within the engine's three seconds.
+listen("models:change", () => { readModels(true); });
+listen("models:trouble", (event) => {
+  farm.modelsTrouble = event.payload;
+  renderModels();
+});
+
 // Settings ----------------------------------------------------------------
 function renderSettings() {
   $("settings-device").textContent = farm.device.configured
@@ -693,6 +899,9 @@ async function refresh() {
     renderCatalog();
     renderInstalled();
   }
+  // What the Tiiny has loaded, and what that means for each app. After the
+  // manifests, because an app's needs are in its manifest.
+  await readModels(false);
 }
 
 listen("install:step", (event) => {
@@ -712,6 +921,7 @@ listen("deep-link:install", (event) => { show("farm"); openCard(event.payload); 
 (async () => {
   farm.info = await invoke("launcher_info");
   farm.settings = await invoke("settings_read");
+  invoke("models_watch");
   await refresh();
   const waiting = await invoke("take_deep_link");
   if (waiting) { show("farm"); openCard(waiting); }

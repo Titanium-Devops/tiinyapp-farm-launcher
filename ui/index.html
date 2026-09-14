@@ -12,6 +12,7 @@
     <nav>
       <button type="button" data-view="farm" aria-pressed="true">The farm</button>
       <button type="button" data-view="running" aria-pressed="false">Running <span class="tally" id="tally">0</span></button>
+      <button type="button" data-view="models" aria-pressed="false">Models</button>
       <button type="button" data-view="settings" aria-pressed="false">Settings</button>
     </nav>
   </header>
@@ -70,6 +71,26 @@
         <p>Pick something from the farm and press Plant. It downloads, checks itself and starts, and nothing else on this computer changes.</p>
         <button class="btn" type="button" id="go-farm">Go to the farm</button>
       </div>
+    </section>
+
+    <!-- Models --------------------------------------------------------- -->
+    <section id="view-models" hidden>
+      <div class="sechead"><h1>Models</h1></div>
+      <p class="lede">What your Tiiny has loaded right now, and what is on its disk. An app can only use a model that is loaded, and loading one costs NPU units.</p>
+
+      <div class="card">
+        <h2>NPU units</h2>
+        <p id="npu-line">Asking your Tiiny.</p>
+        <div class="bar" style="height:14px"><i id="npu-bar" style="width:0%"></i></div>
+      </div>
+
+      <h2 style="font-size:22px;margin:24px 0 12px">Loaded</h2>
+      <div class="rows" id="models-loaded"></div>
+      <p class="lede" id="models-loaded-empty" hidden style="margin-top:0">Nothing is loaded, so no app that needs a model can run yet.</p>
+
+      <h2 style="font-size:22px;margin:28px 0 4px">On its disk, not loaded</h2>
+      <p class="lede" id="models-disk-note">These are downloaded and cost nothing until they are loaded.</p>
+      <div class="rows" id="models-disk"></div>
     </section>
 
     <!-- Settings ------------------------------------------------------ -->
@@ -135,6 +156,11 @@
       <div>
         <h3>What it needs</h3>
         <p id="card-needs"></p>
+        <div id="card-models" hidden style="margin-top:10px">
+          <div class="chips" id="card-model-kinds"></div>
+          <div class="chips" id="card-model-prefers" style="margin-top:6px"></div>
+          <p id="card-model-sentence" style="margin:10px 0 0;color:var(--bad);font-size:14px"></p>
+        </div>
       </div>
       <div>
         <h3>What it can reach</h3>

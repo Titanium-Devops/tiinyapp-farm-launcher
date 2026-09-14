@@ -78,6 +78,12 @@ function farmJson(args, options) {
   const raw = (done.stdout || "").trim();
   if (!raw) throw new Error(`farm ${args[0]} answered nothing. It said: ${(done.stderr || "").trim().split("\n").pop()}`);
   const answer = JSON.parse(raw);
+  // A refusal is an object with an error in it. Reading the fields off it
+  // anyway prints "port undefined" and hides the reason, so it is raised here
+  // with the engine's own sentence.
+  if (answer && answer.error) {
+    throw new Error(answer.error.message || `farm ${args[0]} refused.`);
+  }
   return { answer, commentary: (done.stderr || "").trim().split("\n").filter(Boolean), code: done.status };
 }
 
@@ -138,15 +144,43 @@ try {
 }
 
 // 5. Status, and whether it is answering ---------------------------------
-const status = farmJson(["status"]);
-const row = (status.answer.running || []).find((r) => r.id === appId);
-record(`${appId} is in the status list`, Boolean(row), row ? `pid ${row.pid}, up ${row.uptime}s, health ${row.health ?? "no health path"}` : "");
+try {
+  const status = farmJson(["status"]);
+  const row = (status.answer.running || []).find((r) => r.id === appId);
+  record(`${appId} is in the status list`, Boolean(row), row ? `pid ${row.pid}, up ${row.uptime}s, health ${row.health ?? "no health path"}` : "");
+} catch (error) {
+  record(`${appId} is in the status list`, false, error.message);
+}
 
 // 6. Stop -----------------------------------------------------------------
-const stopped = farmJson(["stop", appId]);
-record(`${appId} stops`, stopped.answer.stopped === true, "");
+try {
+  const stopped = farmJson(["stop", appId]);
+  record(`${appId} stops`, stopped.answer.stopped === true, "");
+} catch (error) {
+  record(`${appId} stops`, false, error.message);
+}
 
 log("");
 const bad = results.filter((r) => !r.ok);
 log(bad.length === 0 ? `All ${results.length} checks passed.` : `${bad.length} of ${results.length} checks failed.`);
+// macOS grants local network access to an application, not to a file. The
+// interpreter in the bundle has it when the launcher started it and does not
+// have it when a terminal did, and since farm 0.1.14 a start asks the Tiiny
+// what it has loaded. So this gate cannot finish those checks from a shell on
+// macOS. It still fails rather than passing, because a skipped check that
+// reads as a pass is worse than a failure somebody has to read.
+if (bad.some((r) => /could not ask your Tiiny|local network/i.test(r.detail || ""))) {
+  // Do not guess at the cause: ask the engine why it cannot see the device.
+  const asked = farm(["models"]);
+  const said = `${asked.stdout || ""}${asked.stderr || ""}`;
+  if (/local network/i.test(said)) {
+    log("");
+    log(said.trim().split("\n").find((line) => /local network/i.test(line)) || "");
+    log("That grant belongs to the launcher, not to the file: macOS gives local");
+    log("network access to an application, and this interpreter only counts as");
+    log("part of one when the launcher started it. Since farm 0.1.14 a start");
+    log("asks the Tiiny what it has loaded, so the last three checks can only");
+    log("be run by driving the built app itself.");
+  }
+}
 process.exit(bad.length === 0 ? 0 : 1);
