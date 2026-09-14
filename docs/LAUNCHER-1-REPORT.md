@@ -168,44 +168,117 @@ means an app that says it opens at `/show` opens at `/show`. The launcher will
 hand the system opener nothing else: only a loopback address or the farm's own
 site, checked before it goes.
 
-### 2.5 macOS Local Network privacy, and the launcher
+### 2.5 Finding the Tiiny
 
-This is the one finding worth reading twice.
+Finding the Tiiny is the engine's job. `farm device --find --json` looks on
+every USB cable in the machine, on this network, and at the TiinyOS client, and
+answers with one object:
 
-The bundled interpreter is a binary macOS has never seen. Measured here, in this
-order:
+```
+{"command":"device","ok":true,"blocked":false,
+ "python":"<the interpreter that did the looking>","moved":null,
+ "found":[{"serial","name","address","via","base","interfaces"}]}
+```
 
-| When | What happened |
+`via` is `cable`, `network` or `TiinyOS client`. The launcher draws exactly that
+and has no second idea of where a Tiiny might be. The first run pane starts
+looking on its own, shows each box by name, address, how it was reached and its
+serial, with one Use button each, offers Look again and a manual address
+underneath, and says in one sentence when nothing answered.
+
+Measured on this Mac, from inside the built app: Jason's Tiiny found over the
+USB cable at 172.17.7.177 in the first look, and the key saved to it from a
+file, mode 0600, without the key ever being displayed.
+
+That command is in farm 0.1.12, which had not published when this was written.
+Until it does, `scripts/runtime.pins.json` carries `farmFrom` and the engine is
+installed from the worktree the finder was written in (Titanium-Devops
+tiinyapp-farm PR 30, branch `device-find`). Deleting `farmFrom` and setting
+`farm` to `0.1.12` is the whole of the repin, and the Settings pane says
+`built from <path>` for as long as it is a worktree, so nothing can quietly
+claim a published version it is not.
+
+### 2.6 macOS Local Network privacy, and why the Info.plist key is the whole story
+
+macOS grants local network access **per application**, and every Python the
+launcher starts is a child of the launcher, so all of it is attributed to
+"Tiiny App Farm". Without `NSLocalNetworkUsageDescription` in `Info.plist`,
+macOS shows no prompt at all: it answers "No route to host" to every probe, for
+ever, which reads exactly like a Tiiny that is switched off. The key is
+declared, and the sentence in it is what the person is shown.
+
+`NSBonjourServices` is deliberately absent. It is only needed to browse or
+advertise an mDNS service and the finder does neither: it reads its own side of
+each USB cable and works out the box's address by arithmetic, sends one UDP
+discovery packet, and asks the TiinyOS client at a fixed host name.
+
+Measured here, all with the same bundled interpreter and the same scratch home,
+and the difference between the rows is only which process was its parent:
+
+| Parent | `farm device --find` said |
 | --- | --- |
-| Bundled interpreter, run as a child of a terminal | `[Errno 65] No route to host` reaching 172.17.7.177 |
-| `farm doctor` inside the launcher, first attempts | "This Python cannot reach your Tiiny at 172.17.7.177, because macOS is blocking it from your local network." Every Python on the machine was blocked, including Apple's. |
-| `farm doctor` inside the launcher, later the same session | "Your Tiiny at 172.17.7.177 answered this Python in 4 ms." Every Python on the machine reached it. |
-| Bundled interpreter, run as a child of a terminal, after all that | still `[Errno 65]` |
+| A terminal | `blocked: true`, and the farm moved to `/opt/homebrew/bin/python3` and saved it |
+| The launcher | `blocked: false`, found Jason's Tiiny over the cable, moved nothing |
 
-Local network access on macOS is granted to the responsible application, not to
-the binary. Run from a terminal, the bundled interpreter inherits the terminal's
-permission, which it does not have. Run as a child of the launcher, it inherits
-the launcher's, which it got. The launcher reaches the Tiiny; a terminal poking
-at the bundled interpreter proves nothing about that.
+And the doctor, run from the Settings pane, so as a child of the launcher:
 
-Two things follow. First, the first-run experience includes a system permission
-prompt nobody has designed for yet, and the window will look broken for as long
-as the person has not answered it. The farm's own `doctor` already says what to
-do in plain words, and it is on the Settings pane, so the material is there. What
-is missing is showing it at the right moment rather than waiting for somebody to
-press Check everything.
+```
+farm 0.1.11, running apps with
+  /Users/sem/Applications/Tiiny App Farm.app/Contents/Resources/runtime/bin/python3.11 (Python 3.11.16).
+The Tiiny on file is at http://172.17.7.177/v1.
+Your Tiiny at 172.17.7.177 answered this Python in 9 ms.
+The key on file is accepted by your Tiiny.
+```
 
-Second, while the permission is refused, the farm's fallback saves a **different
-interpreter** into `~/.tiinyapps/settings.json` and runs apps under it. On the
-first gate run here it saved `/opt/homebrew/bin/python3`. That is the CLI being
-helpful, and it quietly undoes the launcher's whole premise: the apps were not
-running on the Python the launcher carries. Worth a decision before the beta.
+**What was not observed: the prompt itself.** This Mac had already allowed the
+app earlier in the same session, under the same bundle identifier, so macOS did
+not ask again, and nothing here reset that grant: the privacy database is not
+something a build should be rewriting on somebody's machine. What the two rows
+above show is the grant working and its absence failing, which is the behaviour
+either side of the prompt. Seeing the prompt itself needs a machine that has
+never run this bundle identifier, and it belongs in the beta.
 
-None of this was tested on a notarised, Developer ID signed build, because I have
-no certificate. Gatekeeper and the privacy database treat an ad hoc signed app
-differently, and this is the first thing to check on Jason's own certificate.
+### 2.7 One interpreter, and only one
 
-### 2.6 Failure, in words
+A single grant to "Tiiny App Farm" has to cover finding the device, the doctor,
+and every app the launcher starts. That only holds if there is exactly one
+interpreter, so the launcher makes sure of it in two ways.
+
+`farm start` is always given `--python <the bundled interpreter>`, which both
+names it and stops the engine walking to another one.
+
+The other way matters more, because the CLI's fallback is right for somebody at
+a terminal and wrong here: when macOS refuses a Python the local network, the
+farm tries the other Pythons on the machine, keeps the first that gets through,
+and **saves it** in `~/.tiinyapps/settings.json`, where every later command
+reads it. A launcher that inherited that setting would run apps under a
+Homebrew Python nobody has granted anything, and they would fail to reach the
+Tiiny for a reason the person cannot see. So the launcher puts that setting back
+to the bundled interpreter before and after every engine call.
+
+Measured, in that order:
+
+| | |
+| --- | --- |
+| A foreign interpreter written into the settings file by hand | `"python": "/usr/bin/python3"` |
+| After one command from inside the launcher | `"python": ".../Tiiny App Farm.app/Contents/Resources/runtime/bin/python3.11"` |
+| Every other key in that file | untouched |
+| The Story Lantern the launcher started, in `ps` | `.../Tiiny App Farm.app/Contents/Resources/runtime/bin/python3.11 lantern.py` |
+| What that app wrote in its own log | `device http://172.17.7.177:80  found by TIINY_BASE` |
+
+The last two rows are the point: the app the launcher started ran under the
+bundled interpreter and reached the Tiiny. For contrast, Jason's own Story
+Lantern was running beside it the whole time under Xcode's Python 3.9, which is
+why port 8420 was taken and the engine moved the launcher's copy to 8421.
+
+Pinning a shared setting is a real consequence and it is worth saying plainly:
+the launcher writes into the same `~/.tiinyapps` the CLI reads, so a person who
+uses both will find the interpreter pointing inside the app bundle. That is
+stable while the app is installed and harmless once it is not, because
+`Farm.app_python` only takes a saved interpreter that is still runnable and
+falls back to its own otherwise.
+
+### 2.8 Failure, in words
 
 Which failure a message is, and what to offer next, is decided in
 `src-tauri/src/trouble.rs` and tested there, rather than by the page reading
@@ -227,7 +300,7 @@ and the scratch home afterwards contained one empty `.locks` directory and no ap
 The doctor's findings render as sentences with their fix line underneath, which
 is `docs/shots/07-settings-and-doctor.png`.
 
-### 2.7 The window
+### 2.9 The window
 
 Eleven captures in `docs/shots/`, each of the launcher's own window taken by
 window id, so nothing else that was on the screen is in any of them. The window
@@ -239,7 +312,7 @@ of 1197 by 881 points. Saying it again with `set_size` after the window exists i
 taken. The constants are `WINDOW` and `SMALLEST` in `src-tauri/src/lib.rs`, and
 they are what the screenshots were measured at.
 
-### 2.8 Tests
+### 2.10 Tests
 
 42 Rust tests, `cargo clippy --all-targets -- -D warnings` clean, `cargo fmt
 --check` clean. The JSON reader, the progress reader, the state machine, the
@@ -275,6 +348,35 @@ Two the tests found, both fixed in the code rather than in the test:
 - The doctor's fix line rendered twice, because a finding with nothing of its own
   to say carries its fix line as its message and the page drew both.
 
+### 2.11 What CI measured, on GitHub's runners
+
+Both workflows are green in UNSIGNED mode on the pull request, which is what
+this repository can reach before it has a single secret. Run 34891939998
+(macos) and 34891940052 (windows), on commit `1b1e661`:
+
+| Job | |
+| --- | --- |
+| cargo test (macos), fmt and clippy included | success |
+| cargo test (windows) | success |
+| macOS app, aarch64 | success |
+| macOS app, x86_64 | success |
+| Windows installer, NSIS, x64 | success |
+| latest.json | skipped, because the feed job only runs on main |
+
+The Windows numbers, measured on the runner rather than projected:
+
+| What | Measured |
+| --- | --- |
+| NSIS installer | 27,601,779 bytes |
+| Runtime as published, unpacked | 144.7 MB in 3,963 files |
+| Runtime staged and pruned, with farm in it | 119.7 MB in 1,607 files |
+| `farm --version` from the staged tree | `farm 0.1.11` |
+
+The design page projected about 60 MB for the Windows installer. It is 27.6 MB,
+smaller than the macOS disk image even though the tree inside it is twice the
+size, because NSIS compresses it harder than a disk image does. That run staged
+the engine from PyPI; carrying the finder adds a little to both platforms.
+
 ---
 
 ## 3. Deliberate departures from the design page
@@ -303,6 +405,12 @@ itself. The second exists because the key has to reach the engine without ever
 being on a clipboard or in a screenshot, and it is what makes the gate honest.
 It is one extra button and it declares exactly what it does.
 
+**The engine is installed from a worktree, not from PyPI, for now.** The
+finder lands in farm 0.1.12 and 0.1.12 has not published. `farmFrom` in
+`scripts/runtime.pins.json` points at the branch it was written on, the
+Settings pane says so on screen, and the repin is deleting one line and
+changing a version. Nothing else in the repository names a version.
+
 **`farm` on the PATH is a stub.** The switch is in Settings, remembers its
 answer, and says in the window that the doing of it lands later. The brief allows
 a stub in this build.
@@ -313,11 +421,11 @@ a stub in this build.
 
 Nothing in this section has been run.
 
-- **Windows.** The x86_64 runtime is pinned and checksummed and
-  `stage-runtime.mjs` knows the Windows layout, and `windows.yml` stages it and
-  asks the staged engine for its version before it bundles anything. No Windows
-  machine has run any of it. The installer size is unmeasured, and the design
-  page's 60 MB projection stands until a run replaces it.
+- **Windows, by hand.** CI builds it, so the installer and the staging are no
+  longer unmeasured (see 2.9). What has not happened is anybody installing that
+  installer on a Windows machine and pressing a button: no window has been
+  opened, no app has been planted, and the current-user install with no
+  administrator prompt is a configuration rather than an observation.
 - **Signing and notarising.** The macOS workflow signs the four Mach-O files, then
   the app, then notarises and staples the disk image, then refuses to upload
   unless `spctl` and `stapler validate` accept both. None of that has run, because

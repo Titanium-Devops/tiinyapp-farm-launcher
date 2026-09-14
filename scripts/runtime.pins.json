@@ -1,6 +1,8 @@
 {
   "comment": "Everything the launcher carries inside itself, pinned. Change a number here and scripts/stage-runtime.mjs fetches something else; nothing else in the repository names a version.",
   "farm": "0.1.11",
+  "farmFrom": "/Users/sem/code/tiinyapp-farm-find",
+  "farmFromWhy": "farm device --find lands in 0.1.12. Until that is on PyPI the engine is installed from the worktree the finder was written in (Titanium-Devops/tiinyapp-farm PR 30, branch device-find), which still declares 0.1.11. Delete farmFrom and set farm to 0.1.12 the moment it publishes; nothing else in the repository names a version.",
   "python": {
     "release": "20260901",
     "version": "3.11.16",

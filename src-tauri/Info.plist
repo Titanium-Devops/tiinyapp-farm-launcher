@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- THE KEY WITHOUT WHICH THE LAUNCHER CANNOT FIND ANYTHING.
+         macOS grants the local network per application, and the bundled
+         Python is a child of this app, so everything it sends is attributed
+         here. Without this string macOS shows no prompt at all: it simply
+         answers "No route to host" to every probe, for ever, which reads
+         exactly like a Tiiny that is switched off.
+
+         The words below are what the person sees in the prompt, so they say
+         what the app is about to do rather than naming a protocol. -->
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>The Tiiny App Farm looks for your Tiiny on the USB cable and on your network, and the apps it runs talk to the Tiiny the same way.</string>
+
+    <!-- NSBonjourServices is deliberately absent. It is only needed to browse
+         or advertise an mDNS service, and the farm does neither: it reads its
+         own side of each USB cable and works out the box's address by
+         arithmetic, sends one UDP discovery packet on the network, and asks
+         the TiinyOS client at a fixed host name. Declaring services nobody
+         browses would ask for access nothing uses. -->
+</dict>
+</plist>

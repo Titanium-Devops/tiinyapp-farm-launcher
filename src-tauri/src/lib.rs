@@ -43,6 +43,11 @@ pub const SMALLEST: (f64, f64) = (720.0, 560.0);
 pub struct Info {
     pub version: String,
     pub farm: String,
+    /// Set when the engine was installed from a directory rather than from
+    /// PyPI, so nothing can quietly claim a published version it is not.
+    pub farm_from: Option<String>,
+    /// The interpreter every engine command and every app runs under.
+    pub python_path: String,
     pub python: String,
     pub target: String,
     pub runtime_files: u64,
@@ -58,6 +63,8 @@ fn launcher_info(app: tauri::State<'_, Launcher>) -> Info {
     Info {
         version: env!("CARGO_PKG_VERSION").to_string(),
         farm: app.engine.stamp.farm.clone(),
+        farm_from: app.engine.stamp.farm_from.clone(),
+        python_path: app.engine.python.display().to_string(),
         python: app.engine.stamp.python.clone(),
         target: app.engine.stamp.target.clone(),
         runtime_files: app.engine.stamp.files,
@@ -107,6 +114,22 @@ async fn farm_manifest(id: String) -> Result<Value, String> {
     catalog::manifest(&id).await
 }
 
+/// Look for a Tiiny. The engine does the looking: the USB cable, this network
+/// and the TiinyOS client, all three, in one answer. The launcher does not have
+/// a second idea of where a Tiiny might be.
+///
+/// The search puts packets on the wire, so it is the first thing that meets
+/// macOS Local Network privacy, and the first thing that makes the prompt
+/// appear. That is on purpose: it happens on a screen that is already asking
+/// about the network, rather than later, in the middle of an install.
+#[tauri::command]
+async fn device_find(app: tauri::AppHandle) -> Answer<Value> {
+    on_engine(app, |engine| {
+        engine.json(&["device", "--find"], Budget::PATIENT)
+    })
+    .await
+}
+
 /// Install, with the engine's own commentary arriving in the window as it is
 /// printed. The `--yes` is not a shortcut past the confirmation: the card
 /// showed what the app needs and what it asks for before this was pressed,
@@ -152,11 +175,19 @@ async fn work(app: tauri::AppHandle, id: String, verb: &'static str) -> Answer<V
 async fn farm_start(app: tauri::AppHandle, id: String, port: Option<u16>) -> Answer<Value> {
     let answer = on_engine(app.clone(), move |engine| {
         let port = port.map(|p| p.to_string());
+        let ours = engine.python.to_string_lossy().to_string();
         let mut args: Vec<&str> = vec!["start", &id];
         if let Some(port) = &port {
             args.push("--port");
             args.push(port);
         }
+        // Naming the interpreter is not a preference, it is the whole of the
+        // local network story. macOS grants that access per application, and
+        // every Python the launcher starts is attributed to the launcher, so
+        // the one grant has to cover the app as well. `--python` also stops the
+        // engine walking to another interpreter on its own.
+        args.push("--python");
+        args.push(&ours);
         // The engine waits for readiness itself, up to its ten second ceiling,
         // so the budget only has to cover that plus the work around it.
         engine.json(&args, Budget::PATIENT)
@@ -426,6 +457,7 @@ pub fn run() {
             farm_check,
             farm_doctor,
             farm_manifest,
+            device_find,
             farm_install,
             farm_update,
             farm_start,

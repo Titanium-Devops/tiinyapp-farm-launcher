@@ -416,24 +416,79 @@ function nameOf(id) {
 }
 
 // The Tiiny ---------------------------------------------------------------
-async function probeDevice() {
-  const typed = $("device-base").value.trim();
-  $("device-probe-note").textContent = "Knocking.";
-  const answer = await invoke("device_probe", { base: typed || null });
-  if (answer.found) {
-    $("device-base").value = answer.base;
-    $("device-probe-note").textContent = answer.open
-      ? `A Tiiny answered at ${answer.base}, and it is not asking for a key. Save an empty key is not allowed, so paste the one TiinyOS shows.`
-      : `A Tiiny answered at ${answer.base} and it wants a key.`;
-  } else {
-    $("device-probe-note").textContent = `${answer.detail || "Nothing answered."} Type the address your Tiiny shows, such as http://192.168.1.50/v1.`;
+// The engine does the looking. All this does is draw what it found and let
+// somebody pick one.
+
+const VIA_WORDS = {
+  cable: "over the USB cable",
+  network: "on this network",
+  "TiinyOS client": "through the TiinyOS client",
+};
+
+let chosenBase = null;
+
+function lookingState(words) {
+  $("device-found").replaceChildren(el("p", { class: "lede", style: "margin:0", text: words }));
+}
+
+async function lookForTiinys() {
+  lookingState("Looking on every USB cable, on this network, and at the TiinyOS client.");
+  let answer;
+  try {
+    answer = await invoke("device_find");
+  } catch (error) {
+    lookingState(sentence(error));
+    return;
+  }
+  const box = $("device-found");
+  box.replaceChildren();
+
+  // macOS refusing this app the local network is not the same finding as an
+  // absent Tiiny, and saying the second when it is the first sends somebody to
+  // check a cable that was never the problem.
+  if (answer.blocked) {
+    box.append(el("div", { class: "trouble" },
+      el("h3", { text: "macOS has not let this app onto your local network yet" }),
+      el("p", { text: "A box asking about it appears the first time the farm looks. If you have not answered it, answer it and press Look again. If you said no, it is System Settings, then Privacy and Security, then Local Network, then Tiiny App Farm." }),
+      el("p", { class: "lede", style: "margin:0;font-size:13px", text: `The farm was looking with ${answer.python}.` })));
+  }
+
+  const found = answer.found || [];
+  if (!found.length) {
+    if (!answer.blocked) {
+      box.append(el("p", { class: "lede", style: "margin:0",
+        text: "No Tiiny answered. Switch it on, plug the cable in or put it on this network, then press Look again. You can also type its address in yourself." }));
+    }
+    return;
+  }
+
+  for (const row of found) {
+    const name = row.name || "A Tiiny";
+    const where = VIA_WORDS[row.via] || row.via;
+    const facts = el("div", { class: "m" },
+      el("span", { text: `${row.address}, ${where}` }),
+      row.serial ? el("span", { text: row.serial }) : null);
+    box.append(el("div", { class: "approw", style: "margin-top:10px" },
+      el("img", { src: "farm-mark.png", alt: "" }),
+      el("div", {}, el("div", { class: "n", text: name }), facts),
+      el("div", { class: "act" },
+        el("button", { class: "btn small", type: "button", onclick: () => useTiiny(row) },
+          document.createTextNode("Use this one")))));
   }
 }
 
+function useTiiny(row) {
+  chosenBase = row.base;
+  $("device-base").value = row.base;
+  $("device-key-for").textContent = row.name || row.serial || row.address;
+  $("device-key-step").hidden = false;
+  $("device-key").focus();
+}
+
 async function saveDevice() {
-  const base = $("device-base").value.trim();
+  const base = ($("device-base").value || chosenBase || "").trim();
   const key = $("device-key").value;
-  if (!base) { say("The Tiiny needs an address before a key means anything."); return; }
+  if (!base) { say("Pick a Tiiny, or type its address in yourself."); return; }
   if (!key.trim()) { say("Paste the key from TiinyOS, Settings, API Key."); return; }
   try {
     farm.device = await invoke("device_save", { base, key });
@@ -446,9 +501,9 @@ async function saveDevice() {
 }
 
 async function saveDeviceFromFile() {
-  const base = $("device-base").value.trim();
+  const base = ($("device-base").value || chosenBase || "").trim();
   const path = $("keyfile-path").value.trim();
-  if (!base) { say("The Tiiny needs an address first."); return; }
+  if (!base) { say("Pick a Tiiny first, or type its address in yourself."); return; }
   if (!path) { say("Name the file the key is in."); return; }
   try {
     farm.device = await invoke("device_save_from_file", { base, path });
@@ -461,10 +516,23 @@ async function saveDeviceFromFile() {
 }
 
 $("device-save").addEventListener("click", saveDevice);
-$("device-probe").addEventListener("click", probeDevice);
+$("device-look").addEventListener("click", lookForTiinys);
+$("device-manual-toggle").addEventListener("click", () => {
+  const manual = $("device-manual");
+  manual.hidden = !manual.hidden;
+  if (!manual.hidden) {
+    $("device-key-step").hidden = false;
+    $("device-key-for").textContent = "your Tiiny";
+    $("device-base").focus();
+  }
+});
 $("device-file").addEventListener("click", () => $("keyfile").showModal());
 $("keyfile-save").addEventListener("click", saveDeviceFromFile);
-$("settings-device-change").addEventListener("click", () => { show("farm"); $("device-banner").hidden = false; $("device-base").focus(); });
+$("settings-device-change").addEventListener("click", () => {
+  show("farm");
+  $("device-banner").hidden = false;
+  lookForTiinys();
+});
 $("catalog-retry").addEventListener("click", () => refresh());
 
 // Settings ----------------------------------------------------------------
@@ -480,8 +548,9 @@ function renderSettings() {
   about.replaceChildren();
   const facts = [
     ["Launcher", farm.info.version],
-    ["Engine", `farm ${farm.info.farm}`],
+    ["Engine", farm.info.farmFrom ? `farm ${farm.info.farm}, built from ${farm.info.farmFrom}` : `farm ${farm.info.farm}`],
     ["Python", `CPython ${farm.info.python}`],
+    ["Interpreter", farm.info.pythonPath],
     ["Built for", farm.info.target],
     ["Runtime on disk", `${mb(farm.info.runtimeBytes)} in ${farm.info.runtimeFiles} files`],
     ["Apps", farm.info.appsDir],
@@ -581,10 +650,12 @@ async function refresh() {
     $("catalog-empty-note").textContent = sentence(error);
     farm.catalog = [];
   }
+  const wasHidden = $("device-banner").hidden;
   $("device-banner").hidden = farm.device.configured;
-  if (!farm.device.configured && !$("device-base").value) {
-    $("device-base").value = farm.settings.manualBase || "";
-  }
+  // The first time the pane appears, start looking without being asked. The
+  // search is also what makes macOS ask about the local network, and this is
+  // the screen where that question makes sense.
+  if (!farm.device.configured && wasHidden) lookForTiinys();
   renderCatalog();
   renderInstalled();
   renderSettings();

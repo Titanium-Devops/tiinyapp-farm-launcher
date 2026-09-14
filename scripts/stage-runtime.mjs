@@ -246,14 +246,25 @@ async function main() {
   log(`prune    ${pruned} paths removed`);
 
   const python = interpreterIn(tree);
-  log(`farm     installing tiinyapp-farm==${pins.farm}`);
+  // Normally the pinned release off PyPI. `farmFrom` in the pins file installs
+  // it from a directory instead, which is how a version that has not published
+  // yet gets carried. The version check below is the same either way, so a
+  // source that declares something else fails here rather than in somebody's
+  // hands.
+  const from = pins.farmFrom || null;
+  if (from && !fs.existsSync(path.join(from, "pyproject.toml"))) {
+    throw new Error(`farmFrom points at ${from}, which is not a Python project.`);
+  }
+  log(from
+    ? `farm     installing tiinyapp-farm from ${from} (expecting ${pins.farm})`
+    : `farm     installing tiinyapp-farm==${pins.farm}`);
   execFileSync(
     python,
     [
       "-m", "pip", "install",
       "--quiet", "--no-cache-dir", "--no-compile", "--disable-pip-version-check",
       "--no-warn-script-location",
-      `tiinyapp-farm==${pins.farm}`,
+      ...(from ? [from] : [`tiinyapp-farm==${pins.farm}`]),
     ],
     { stdio: "inherit", env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" } },
   );
@@ -302,6 +313,7 @@ async function main() {
         python: pins.python.version,
         pythonRelease: pins.python.release,
         farm: pins.farm,
+        farmFrom: pins.farmFrom || null,
         stagedAt: new Date().toISOString(),
         files: after.files,
         bytes: after.bytes,

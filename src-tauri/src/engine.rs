@@ -39,6 +39,8 @@ pub struct Stamp {
     #[serde(default)]
     pub farm: String,
     #[serde(default)]
+    pub farm_from: Option<String>,
+    #[serde(default)]
     pub files: u64,
     #[serde(default)]
     pub bytes: u64,
@@ -139,6 +141,47 @@ impl Engine {
             Some(home) => home.join(".tiinyapps"),
             None => home_dir().join(".tiinyapps"),
         }
+    }
+
+    /// The launcher owns one interpreter, and it is the one inside the bundle.
+    ///
+    /// The CLI moves off a Python that macOS refused the local network, and
+    /// saves the one it moved to. That is right for somebody at a terminal and
+    /// wrong here: local network access is granted per application, so every
+    /// Python the launcher starts is attributed to the launcher, and one grant
+    /// covers finding the Tiiny, the doctor and every app. A second interpreter
+    /// would need a second grant nobody will ever be asked for, and an app
+    /// started under it would fail to reach the Tiiny for a reason the person
+    /// cannot see.
+    ///
+    /// So before and after every engine call the saved setting is put back to
+    /// the bundled interpreter. Returns the path it displaced, when it
+    /// displaced one.
+    ///
+    /// A path inside the bundle is stable while the app is installed, and
+    /// harmless once it is not: `Farm.app_python` only takes a saved
+    /// interpreter that is still runnable, and falls back to its own otherwise.
+    pub fn pin_interpreter(&self) -> Option<String> {
+        let ours = self.python.to_string_lossy().to_string();
+        let file = self.config_dir().join("settings.json");
+        let raw = std::fs::read_to_string(&file).unwrap_or_default();
+        let (next, displaced) = pinned_settings(&raw, &ours)?;
+        if std::fs::create_dir_all(self.config_dir()).is_err() {
+            return None;
+        }
+        std::fs::write(&file, next).ok()?;
+        displaced
+    }
+
+    /// Whether the saved interpreter is already the bundled one, which is what
+    /// the report shows rather than a claim.
+    pub fn interpreter_on_file(&self) -> Option<String> {
+        let raw = std::fs::read_to_string(self.config_dir().join("settings.json")).ok()?;
+        let value: Value = serde_json::from_str(&raw).ok()?;
+        value
+            .get("python")
+            .and_then(Value::as_str)
+            .map(str::to_string)
     }
 
     fn command(&self, args: &[&str]) -> Command {
@@ -247,6 +290,10 @@ impl Engine {
     where
         F: FnMut(&str) + Send + 'static,
     {
+        // Before, so the engine starts from the bundled interpreter, and after,
+        // because a command that met a refused local network will have moved
+        // the setting somewhere else while it ran.
+        self.pin_interpreter();
         let mut command = self.command(args);
         if stdin_text.is_some() {
             command.stdin(Stdio::piped());
@@ -293,7 +340,9 @@ impl Engine {
             let _ = err_tx.send(lines);
         });
 
-        let status = wait_with_budget(&mut child, budget)?;
+        let status = wait_with_budget(&mut child, budget);
+        self.pin_interpreter();
+        let status = status?;
         let stdout = out_rx
             .recv_timeout(Duration::from_secs(5))
             .unwrap_or_default();
@@ -312,6 +361,30 @@ impl Engine {
         }
         Ok((stdout, commentary))
     }
+}
+
+/// Put `python` in the settings text, keeping every other key.
+///
+/// Returns the text to write and the interpreter it displaced, or `None` when
+/// the setting already says what it should and nothing needs writing. A
+/// settings file that is not readable JSON is replaced rather than parsed
+/// around: the farm treats it as absent too.
+pub fn pinned_settings(raw: &str, python: &str) -> Option<(String, Option<String>)> {
+    let mut held: serde_json::Map<String, Value> = serde_json::from_str(raw)
+        .ok()
+        .and_then(|value: Value| match value {
+            Value::Object(map) => Some(map),
+            _ => None,
+        })
+        .unwrap_or_default();
+    let displaced = match held.get("python") {
+        Some(Value::String(saved)) if saved == python => return None,
+        Some(Value::String(saved)) => Some(saved.clone()),
+        _ => None,
+    };
+    held.insert("python".to_string(), Value::String(python.to_string()));
+    let text = serde_json::to_string_pretty(&Value::Object(held)).ok()? + "\n";
+    Some((text, displaced))
 }
 
 /// Wait for the child, killing it when the budget runs out. Returns whether it
@@ -365,6 +438,53 @@ mod tests {
             "{}",
             error.message
         );
+    }
+
+    const OURS: &str = "/Applications/Tiiny App Farm.app/Contents/Resources/runtime/bin/python3.11";
+
+    #[test]
+    fn an_empty_settings_file_gains_the_bundled_interpreter() {
+        let (text, displaced) = pinned_settings("", OURS).unwrap();
+        assert_eq!(displaced, None);
+        let back: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(back["python"], OURS);
+    }
+
+    #[test]
+    fn a_python_the_farm_moved_to_is_put_back_and_named() {
+        // What farm 0.1.11 saves when macOS refuses the local network: it walks
+        // the other Pythons on the machine and keeps the first that gets
+        // through. Inside the launcher that is the wrong answer, because the
+        // grant belongs to the app.
+        let raw = r#"{"python": "/opt/homebrew/bin/python3"}"#;
+        let (text, displaced) = pinned_settings(raw, OURS).unwrap();
+        assert_eq!(displaced.as_deref(), Some("/opt/homebrew/bin/python3"));
+        let back: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(back["python"], OURS);
+    }
+
+    #[test]
+    fn a_setting_that_is_already_ours_is_not_rewritten() {
+        let raw = format!("{{\"python\": \"{OURS}\"}}");
+        assert!(pinned_settings(&raw, OURS).is_none());
+    }
+
+    #[test]
+    fn everything_else_in_the_settings_file_survives() {
+        let raw = r#"{"python": "/usr/bin/python3", "somethingElse": 7, "kept": ["a"]}"#;
+        let (text, _) = pinned_settings(raw, OURS).unwrap();
+        let back: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(back["python"], OURS);
+        assert_eq!(back["somethingElse"], 7);
+        assert_eq!(back["kept"][0], "a");
+    }
+
+    #[test]
+    fn a_settings_file_that_is_not_json_is_replaced_rather_than_parsed_around() {
+        let (text, displaced) = pinned_settings("this is not json", OURS).unwrap();
+        assert_eq!(displaced, None);
+        let back: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(back["python"], OURS);
     }
 
     #[test]

@@ -20,20 +20,32 @@
     <!-- The farm ---------------------------------------------------- -->
     <section id="view-farm">
       <div class="banner" id="device-banner" hidden>
-        <h2 id="device-title">Find your Tiiny</h2>
-        <p id="device-note">Apps run on this computer and talk to the Tiiny on your network. Paste the key once and the farm keeps it, at mode 0600, where the command line tool keeps it.</p>
-        <label class="field">Address
-          <input id="device-base" type="text" spellcheck="false" autocomplete="off" placeholder="http://openai.api.tiiny/v1">
-          <small id="device-probe-note">TiinyOS publishes this address on a Mac. If nothing answers, type the one your Tiiny shows.</small>
-        </label>
-        <label class="field">API key
-          <input id="device-key" type="password" spellcheck="false" autocomplete="off" placeholder="From TiinyOS, Settings, API Key">
-          <small>It is written to the device file and never shown again.</small>
-        </label>
-        <div class="row">
-          <button class="btn" type="button" id="device-save">Save the key</button>
-          <button class="btn ghost" type="button" id="device-probe">Look for it</button>
-          <button class="btn quiet" type="button" id="device-file">Read the key from a file</button>
+        <h2>Find your Tiiny</h2>
+        <p id="device-note">Apps run on this computer and talk to the Tiiny on your network. The farm looks on every USB cable, on this network, and at the TiinyOS client.</p>
+
+        <div id="device-found"></div>
+
+        <div class="row" style="margin-top:14px">
+          <button class="btn ghost" type="button" id="device-look">Look again</button>
+          <button class="btn quiet" type="button" id="device-manual-toggle">Type the address myself</button>
+        </div>
+
+        <div id="device-manual" hidden style="margin-top:16px;border-top:1px solid var(--fence);padding-top:16px">
+          <label class="field">Address
+            <input id="device-base" type="text" spellcheck="false" autocomplete="off" placeholder="http://172.17.7.177/v1">
+            <small>The address your Tiiny shows, with /v1 on the end.</small>
+          </label>
+        </div>
+
+        <div id="device-key-step" hidden style="margin-top:16px;border-top:1px solid var(--fence);padding-top:16px">
+          <label class="field">API key for <span id="device-key-for">your Tiiny</span>
+            <input id="device-key" type="password" spellcheck="false" autocomplete="off" placeholder="From TiinyOS, Settings, API Key">
+            <small>It is written to the device file at mode 0600 and never shown again.</small>
+          </label>
+          <div class="row">
+            <button class="btn" type="button" id="device-save">Save the key</button>
+            <button class="btn quiet" type="button" id="device-file">Read the key from a file</button>
+          </div>
         </div>
       </div>
 
