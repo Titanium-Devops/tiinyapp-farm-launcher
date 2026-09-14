@@ -21,9 +21,10 @@ smallest size the launcher allows.
 | `08-failure-in-words.png` | A checksum mismatch. Nothing was unpacked and the panel says so. |
 | `09-the-tray.png` | The menu bar menu: what is running, with Open, Stop and Update behind it. |
 | `10-smallest-size.png` | The window at 720 by 560, the smallest it goes. The grid drops to two columns. |
+| `12-smallest-first-run.png` | The same size, on the first run. The found row puts its button underneath rather than running off the side. |
 | `11-the-log.png` | A stopped app's own `farm.log`. The Tiiny's hardware serial is blacked out; it is the device's, not the launcher's, and it does not need to travel in a public repository. |
 
-Two serials are blacked out, in `01` and `11`. They identify one person's
+Three serials are blacked out, in `01`, `11` and `12`. They identify one person's
 device, they are not something the launcher handles, and they do not need to
 travel in a public repository. Nothing else in any picture is edited.
 
