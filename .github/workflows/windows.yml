@@ -37,6 +37,19 @@ jobs:
           restore-keys: |
             windows-cargo-test-
 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # tauri-build refuses to build at all when a declared resource path is
+      # not there, and `runtime` is not committed: it is fetched and staged.
+      # Staging it here also means the staging script is exercised on Windows
+      # before the long installer job starts, which is how the prune pattern
+      # that ate Lib/threading.py was caught.
+      - name: Stage the bundled Python and the pinned farm
+        run: node scripts/stage-runtime.mjs --target x86_64-pc-windows-msvc
+
       # The JSON reader, the progress reader, the state machine and the deep
       # link parser are plain Rust with no window behind them, so this runner is
       # a real test run and not a compile check.

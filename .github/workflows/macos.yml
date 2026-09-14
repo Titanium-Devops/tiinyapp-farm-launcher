@@ -38,6 +38,20 @@ jobs:
           restore-keys: |
             macos-cargo-test-
 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # tauri-build refuses to build at all when a declared resource path is
+      # not there, and `runtime` is not committed: it is fetched and staged.
+      # So the test job stages it too. That costs a minute and buys the thing
+      # that matters: the staging script is exercised on both platforms before
+      # the long bundle jobs start, which is how the prune pattern that ate
+      # Lib/threading.py on Windows was caught.
+      - name: Stage the bundled Python and the pinned farm
+        run: node scripts/stage-runtime.mjs
+
       - name: cargo fmt
         working-directory: src-tauri
         run: cargo fmt --check

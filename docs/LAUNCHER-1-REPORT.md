@@ -248,7 +248,16 @@ behind them, so this is a real test run rather than a compile check.
 
 Three defects were found by something other than me reading the code.
 
-The Windows leg of CI found one this Mac never could. The prune patterns were
+CI found two this Mac never could, both because the repository builds
+differently from a working copy.
+
+`cargo test` could not build at all on a clean checkout. `tauri-build` refuses
+when a declared resource path is missing, and `runtime` is not committed: it is
+fetched and staged. It was there on this Mac and nowhere else. Both test jobs
+stage it now, which also means the staging script is exercised on both platforms
+before the long bundle jobs start.
+
+The other was Windows only. The prune patterns were
 resolved with `fs.existsSync` for any segment without a wildcard in it, and
 Windows has a case insensitive filesystem: `lib` found `Lib`, and `thread*`
 inside it matched `Lib/threading.py` and deleted the standard library's
