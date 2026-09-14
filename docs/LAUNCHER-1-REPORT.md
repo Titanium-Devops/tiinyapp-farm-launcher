@@ -190,6 +190,13 @@ Measured on this Mac, from inside the built app: Jason's Tiiny found over the
 USB cable at 172.17.7.177 in the first look, and the key saved to it from a
 file, mode 0600, without the key ever being displayed.
 
+Two of the four states that pane can be in were not seen, because the Tiiny was
+plugged in the whole time and the app already held its local network grant: the
+sentence when nothing answers, and the panel when macOS has refused the app.
+Both are written and both are one branch away from the state that was seen, but
+neither has been on screen, and a picture of one would have to be staged rather
+than met.
+
 That command is in farm 0.1.12, which had not published when this was written.
 Until it does, `scripts/runtime.pins.json` carries `farmFrom` and the engine is
 installed from the commit the finder was written on,
