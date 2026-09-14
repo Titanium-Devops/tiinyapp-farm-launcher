@@ -80,11 +80,15 @@ own. The macOS workflow runs the same two checks before it will upload anything.
 
 | What | Measured | The page's figure |
 | --- | --- | --- |
-| Disk image, arm64 | 32,463,912 bytes | projected about 25 MB |
+| Disk image, arm64 | 32,464,071 bytes | projected about 25 MB |
 | App bundle on disk | 73.5 MB | 7.8 MB plus a runtime |
 | Runtime as published | 27,087,450 bytes (66.1 MB unpacked, 2,035 files) | 27.1 MB |
 | Runtime staged, pruned, with farm in it | 56.2 MB in 1,518 files | 44 MB, 1,650 files for 3.11.13 |
 | `farm --version` from inside the bundle | `farm 0.1.11` | the phase 0 question |
+
+The disk image figure moves by a few hundred bytes between builds of the same
+source, because it is compressed. Four builds here came in between 32,459,073
+and 32,464,071 bytes.
 
 Two reasons the staged tree is bigger than the page's 3.11.13 figure. 3.11.16
 ships tcl9 and tk9 rather than tcl8, and both `bin/python3.11` and
