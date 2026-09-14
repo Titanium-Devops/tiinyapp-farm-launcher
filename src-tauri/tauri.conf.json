@@ -1,0 +1,63 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Tiiny App Farm",
+  "version": "0.1.0",
+  "identifier": "farm.tiinyapp.launcher",
+  "build": {
+    "frontendDist": "../ui"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' data: https://tiinyapp.farm; style-src 'self' 'unsafe-inline'; font-src 'self'; script-src 'self'; connect-src ipc: http://ipc.localhost; frame-src 'none'; object-src 'none'",
+      "capabilities": []
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "createUpdaterArtifacts": false,
+    "category": "Utility",
+    "shortDescription": "Install and run Tiiny farm apps",
+    "longDescription": "The Tiiny App Farm launcher installs and runs farm apps beside your Tiiny AI Pocket Lab. It carries its own Python and the farm command line tool inside itself, so there is nothing to install first.",
+    "copyright": "Titanium Computing",
+    "publisher": "Titanium Computing",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": {
+      "runtime": "runtime",
+      "icons/tray/22x22.png": "icons/tray/22x22.png",
+      "icons/tray/44x44.png": "icons/tray/44x44.png"
+    },
+    "macOS": {
+      "hardenedRuntime": true,
+      "minimumSystemVersion": "10.15",
+      "entitlements": "entitlements.plist"
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["tiinyfarm"]
+      }
+    },
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDMxQjYwRTgxMjI2RkRFNTAKUldSUTNtOGlnUTYyTWZGTlpjSXJ6Nzh3UkpzdXhSby9BVS9EYzE5Znpic2dVdzk0V2hpREp2bGMK",
+      "endpoints": ["https://tiinyapp.farm/launcher/latest.json"],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  }
+}

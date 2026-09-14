@@ -1,0 +1,16 @@
+{
+  "name": "tiinyapp-farm-launcher",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The Tiiny App Farm launcher",
+  "type": "module",
+  "scripts": {
+    "stage": "node scripts/stage-runtime.mjs",
+    "tauri": "tauri",
+    "dev": "tauri dev",
+    "build": "tauri build"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}

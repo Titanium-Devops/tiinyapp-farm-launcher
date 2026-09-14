@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tiiny App Farm</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <header>
+    <div class="brand"><img src="farm-mark.png" alt=""> Tiiny App Farm</div>
+    <nav>
+      <button type="button" data-view="farm" aria-pressed="true">The farm</button>
+      <button type="button" data-view="running" aria-pressed="false">Running <span class="tally" id="tally">0</span></button>
+      <button type="button" data-view="settings" aria-pressed="false">Settings</button>
+    </nav>
+  </header>
+
+  <main>
+    <!-- The farm ---------------------------------------------------- -->
+    <section id="view-farm">
+      <div class="banner" id="device-banner" hidden>
+        <h2 id="device-title">Find your Tiiny</h2>
+        <p id="device-note">Apps run on this computer and talk to the Tiiny on your network. Paste the key once and the farm keeps it, at mode 0600, where the command line tool keeps it.</p>
+        <label class="field">Address
+          <input id="device-base" type="text" spellcheck="false" autocomplete="off" placeholder="http://openai.api.tiiny/v1">
+          <small id="device-probe-note">TiinyOS publishes this address on a Mac. If nothing answers, type the one your Tiiny shows.</small>
+        </label>
+        <label class="field">API key
+          <input id="device-key" type="password" spellcheck="false" autocomplete="off" placeholder="From TiinyOS, Settings, API Key">
+          <small>It is written to the device file and never shown again.</small>
+        </label>
+        <div class="row">
+          <button class="btn" type="button" id="device-save">Save the key</button>
+          <button class="btn ghost" type="button" id="device-probe">Look for it</button>
+          <button class="btn quiet" type="button" id="device-file">Read the key from a file</button>
+        </div>
+      </div>
+
+      <div class="sechead"><h1>The farm</h1></div>
+      <p class="lede" id="farm-lede">Everything growing on the farm right now. Opening a card shows what an app needs and what it can reach before anything downloads.</p>
+      <div class="grid" id="catalog"></div>
+      <div class="empty" id="catalog-empty" hidden>
+        <img src="farm-mark.png" alt="">
+        <h2>The catalog is not answering</h2>
+        <p id="catalog-empty-note">Nothing came back from tiinyapp.farm. Check this computer's network and try again.</p>
+        <button class="btn" type="button" id="catalog-retry">Try again</button>
+      </div>
+    </section>
+
+    <!-- Running ------------------------------------------------------ -->
+    <section id="view-running" hidden>
+      <div class="sechead"><h1>Running</h1></div>
+      <p class="lede">What is installed on this computer. Closing this window leaves everything here running; the menu bar keeps the same list.</p>
+      <div class="rows" id="installed"></div>
+      <div class="empty" id="installed-empty" hidden>
+        <img src="farm-mark.png" alt="">
+        <h2>Nothing is planted yet</h2>
+        <p>Pick something from the farm and press Plant. It downloads, checks itself and starts, and nothing else on this computer changes.</p>
+        <button class="btn" type="button" id="go-farm">Go to the farm</button>
+      </div>
+    </section>
+
+    <!-- Settings ------------------------------------------------------ -->
+    <section id="view-settings" hidden>
+      <div class="sechead"><h1>Settings</h1></div>
+      <p class="lede">The Tiiny this computer talks to, what starts on its own, and what this app is carrying inside itself.</p>
+
+      <div class="card">
+        <h2>Your Tiiny</h2>
+        <p id="settings-device">No Tiiny is on file yet.</p>
+        <div class="row">
+          <button class="btn ghost small" type="button" id="settings-device-change">Change it</button>
+          <button class="btn ghost small" type="button" id="settings-doctor">Check everything</button>
+        </div>
+        <div id="doctor-findings"></div>
+      </div>
+
+      <div class="card">
+        <h2>On this computer</h2>
+        <div class="switch">
+          <div><b>Start with the computer</b><span>The farm opens quietly in the menu bar when you log in.</span></div>
+          <button class="toggle" type="button" id="toggle-autostart" role="switch" aria-checked="false" aria-label="Start with the computer"></button>
+        </div>
+        <div class="switch">
+          <div><b>Put <code>farm</code> on the PATH</b><span id="path-note">Adds the command line tool to your shell. Nothing here needs it.</span></div>
+          <button class="toggle" type="button" id="toggle-path" role="switch" aria-checked="false" aria-label="Put farm on the PATH"></button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>What this app carries</h2>
+        <dl class="facts" id="about"></dl>
+      </div>
+    </section>
+  </main>
+
+  <!-- An app's card ------------------------------------------------- -->
+  <dialog id="card">
+    <div class="sheet-head">
+      <img id="card-icon" src="farm-mark.png" alt="">
+      <div>
+        <h2 id="card-name">App</h2>
+        <div class="sub" id="card-sub"></div>
+      </div>
+      <button class="sheet-close" type="button" data-close="card" aria-label="Close">&times;</button>
+    </div>
+    <div class="sheet-body">
+      <p id="card-pitch"></p>
+      <div id="card-trouble" class="trouble" hidden>
+        <h3 id="card-trouble-head">That did not work</h3>
+        <p id="card-trouble-text"></p>
+        <div class="row" id="card-trouble-actions"></div>
+      </div>
+      <div id="card-progress" hidden>
+        <div class="bar"><i id="card-bar" style="width:0%"></i></div>
+        <div class="step" id="card-step"></div>
+      </div>
+      <div>
+        <h3>What it needs</h3>
+        <p id="card-needs"></p>
+      </div>
+      <div>
+        <h3>What it can reach</h3>
+        <p id="card-permissions"></p>
+        <p class="lede" style="margin:8px 0 0;font-size:13px">The farm shows what an author declared. It does not fence an app in once it is running.</p>
+      </div>
+      <div>
+        <h3>About</h3>
+        <p id="card-description"></p>
+      </div>
+      <div class="sheet-foot" id="card-actions"></div>
+    </div>
+  </dialog>
+
+  <!-- A crashed app's log -------------------------------------------- -->
+  <dialog id="logs">
+    <div class="sheet-head">
+      <div>
+        <h2 id="logs-name">farm.log</h2>
+        <div class="sub" id="logs-sub">The last lines the app wrote before it stopped.</div>
+      </div>
+      <button class="sheet-close" type="button" data-close="logs" aria-label="Close">&times;</button>
+    </div>
+    <div class="sheet-body">
+      <pre class="log" id="logs-body"></pre>
+      <div class="sheet-foot">
+        <button class="btn ghost" type="button" data-close="logs">Close</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- The key file -------------------------------------------------- -->
+  <dialog id="keyfile">
+    <div class="sheet-head">
+      <div>
+        <h2>Read the key from a file</h2>
+        <div class="sub">The launcher opens the file itself. The key is never shown, never copied and never written anywhere but the device file.</div>
+      </div>
+      <button class="sheet-close" type="button" data-close="keyfile" aria-label="Close">&times;</button>
+    </div>
+    <div class="sheet-body">
+      <label class="field">Path to the key file
+        <input id="keyfile-path" type="text" spellcheck="false" autocomplete="off" placeholder="/Users/you/.tiiny_1_api_key">
+      </label>
+      <div class="sheet-foot">
+        <button class="btn" type="button" id="keyfile-save">Use this file</button>
+        <button class="btn ghost" type="button" data-close="keyfile">Cancel</button>
+      </div>
+    </div>
+  </dialog>
+
+  <div id="toast" hidden></div>
+  <script src="app.js"></script>
+</body>
+</html>
