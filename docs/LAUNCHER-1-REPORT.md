@@ -12,7 +12,7 @@ called "Planned, not measured" and is labelled as such there.
 
 ## 1. What it is
 
-A Tauri 2 app carrying CPython 3.11.16 and `tiinyapp-farm` 0.1.11 inside itself.
+A Tauri 2 app carrying CPython 3.11.16 and `tiinyapp-farm` 0.1.13 inside itself.
 Every action the window takes is the CLI doing the work, run as a child process
 with `--json`. One install directory, one device file, one lock, one set of
 failure messages, whichever face somebody came in through.
@@ -104,7 +104,7 @@ the interpreter statically. Dropping it is now the default and
 that wants to embed Python. No app in the catalog does today.
 
 The bundle without it still works, which is the point of dropping it rather than
-arguing about it: `farm --version` answers `farm 0.1.12` from inside the app, and
+arguing about it: `farm --version` answers `farm 0.1.13` from inside the app, and
 the ten check gate ran again on that bundle and installed, started, listed and
 stopped a real app against the real Tiiny.
 
@@ -221,9 +221,9 @@ While the finder was unpublished the pin was the public commit it was written
 on, as a git URL rather than a path, so a runner that had never seen this Mac
 built the same thing. CI proved that before the repin, which is worth keeping in
 mind the next time the launcher needs something the engine has not shipped yet. Deleting `farmFrom` and setting
-`farm` to `0.1.12` is the whole of the repin, and the Settings pane says
-`built from <path>` for as long as it is a worktree, so nothing can quietly
-claim a published version it is not.
+`farm` to a published version is the whole of the repin, and the Settings pane
+says `built from <url>` for as long as the pin is not a release, so nothing can
+quietly claim a published version it is not.
 
 ### 2.6 macOS Local Network privacy, and why the Info.plist key is the whole story
 
@@ -250,10 +250,10 @@ and the difference between the rows is only which process was its parent:
 And the doctor, run from the Settings pane, so as a child of the launcher:
 
 ```
-farm 0.1.11, running apps with
+farm 0.1.13, running apps with
   /Users/sem/Applications/Tiiny App Farm.app/Contents/Resources/runtime/bin/python3.11 (Python 3.11.16).
 The Tiiny on file is at http://172.17.7.177/v1.
-Your Tiiny at 172.17.7.177 answered this Python in 9 ms.
+Your Tiiny at 172.17.7.177 answered this Python in 2 ms.
 The key on file is accepted by your Tiiny.
 ```
 
