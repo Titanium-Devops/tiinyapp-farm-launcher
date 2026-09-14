@@ -1,8 +1,6 @@
 {
   "comment": "Everything the launcher carries inside itself, pinned. Change a number here and scripts/stage-runtime.mjs fetches something else; nothing else in the repository names a version.",
-  "farm": "0.1.11",
-  "farmFrom": "git+https://github.com/Titanium-Devops/tiinyapp-farm@7e4cce61e96209f241eca9405c6945ed49ae5b0a",
-  "farmFromWhy": "farm device --find lands in 0.1.12. Until that is on PyPI the engine is installed from the commit the finder was written on (Titanium-Devops/tiinyapp-farm PR 30, branch device-find), which still declares 0.1.11. A commit rather than a branch, so this builds the same thing next week, and a URL rather than a path, so a runner that has never seen this Mac builds it too. Delete farmFrom and set farm to 0.1.12 the moment it publishes; nothing else in the repository names a version.",
+  "farm": "0.1.12",
   "python": {
     "release": "20260901",
     "version": "3.11.16",

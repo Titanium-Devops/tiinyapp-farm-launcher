@@ -50,22 +50,22 @@ scripts/sign-runtime.sh "Developer ID Application: ..."
 
 ## Checking it against a real Tiiny
 
-```sh
-node scripts/verify-launcher.mjs \
-  --app "$HOME/Applications/Tiiny App Farm.app" \
-  --home /tmp/farm-gate \
-  --base http://your-tiiny/v1 \
-  --key-file "$HOME/.tiiny_1_api_key" \
-  --app-id story-lantern
-```
+`scripts/verify-launcher.mjs` drives the built bundle's engine against a real
+Tiiny in a scratch home, and prints what happened in sentences. Its own header
+comment says how to call it.
 
-`--home` is required and is not optional by accident: a gate that runs against
-somebody's real `~/tiinyapps` can install, start and remove their apps. The key
-file is read by that process and written to the child's standard input. It is
-never an argument, never an environment variable and never printed.
+Two things about it are deliberate. `--home` is required, because a gate that
+runs against somebody's real `~/tiinyapps` can install, start and remove their
+apps. And the device key is read by that script and written straight to the
+child's standard input, never to an argument, an environment variable or a log.
 
-The same variable works on the app itself. `FARM_LAUNCHER_HOME=/tmp/farm-gate`
-points the launcher's engine at a scratch home for a test run.
+**The launcher itself has no way to be handed a path to a key file.** The device
+pane takes the key one way, by being pasted into a masked field, and writes it
+through `farm device --key-stdin`. A path field would be a second way in, and it
+would teach somebody to leave their key lying about in a file.
+
+`FARM_LAUNCHER_HOME=/tmp/farm-gate` works on the app too, and points the
+launcher's engine at a scratch home for a test run.
 
 ## Tests
 

@@ -44,9 +44,18 @@ while IFS= read -r file; do
   esac
 done < <(find "$runtime" -type f ! -type l)
 
-if [ "$signed" -eq 0 ]; then
-  echo "Nothing in src-tauri/runtime is a Mach-O file, which cannot be right." >&2
+# The staging script counted them when it built the tree. Comparing against
+# that, rather than against a number typed here, means a runtime release that
+# changes what it ships fails loudly instead of leaving a file unsigned inside
+# a signed bundle.
+expected="$(node -p "require('$runtime/runtime.json').machO" 2>/dev/null || echo "")"
+if [ -z "$expected" ] || [ "$expected" = "undefined" ]; then
+  echo "runtime.json does not say how many Mach-O files were staged. Run: npm run stage" >&2
+  exit 1
+fi
+if [ "$signed" -ne "$expected" ]; then
+  echo "Signed $signed Mach-O files and the staged tree has $expected." >&2
   exit 1
 fi
 
-echo "$signed Mach-O files signed with ${identity}"
+echo "$signed Mach-O files signed with ${identity}, which is what the staged tree has"

@@ -64,10 +64,12 @@ held for 3.11.16, but only after pruning. Measured here:
 | --- | --- |
 | Mach-O files in the tree as published | 11 |
 | Mach-O files after the page's prune list | 4 |
+| Mach-O files after `libpython3.11.dylib` is dropped too | 3 |
 
-The seven that go are the tcl and tk libraries, the itcl and thread extensions,
-and `_tkinter`. The four that stay are `bin/python3.11`,
-`lib/libpython3.11.dylib`, `lib-dynload/_crypt` and `lib-dynload/_dbm`.
+The seven that go with the page's list are the tcl and tk libraries, the itcl
+and thread extensions, and `_tkinter`. The eighth is `libpython3.11.dylib`,
+which nothing links against. The three that stay are `bin/python3.11`,
+`lib-dynload/_crypt` and `lib-dynload/_dbm`.
 `scripts/sign-runtime.sh` signs those four, in the staging directory, before
 `tauri build` copies them. A Mach-O signature lives inside the file, so signing
 the staging copy is signing what ships.
@@ -80,11 +82,11 @@ own. The macOS workflow runs the same two checks before it will upload anything.
 
 | What | Measured | The page's figure |
 | --- | --- | --- |
-| Disk image, arm64 | 32,764,713 bytes | projected about 25 MB |
-| App bundle on disk | 73.5 MB | 7.8 MB plus a runtime |
+| Disk image, arm64 | 25,247,412 bytes | projected about 25 MB |
+| App bundle on disk | 56.8 MB | 7.8 MB plus a runtime |
 | Runtime as published | 27,087,450 bytes (66.1 MB unpacked, 2,035 files) | 27.1 MB |
-| Runtime staged, pruned, with farm in it | 56.2 MB in 1,518 files | 44 MB, 1,650 files for 3.11.13 |
-| `farm --version` from inside the bundle | `farm 0.1.11` | the phase 0 question |
+| Runtime staged, pruned, with farm in it | 39.3 MB in 1,517 files | 44 MB, 1,650 files for 3.11.13 |
+| `farm --version` from inside the bundle | `farm 0.1.12` | the phase 0 question |
 
 The disk image figure moves by a few hundred bytes between builds of the same
 source, because it is compressed. The builds here came in between 32,459,073
@@ -94,14 +96,26 @@ Two reasons the staged tree is bigger than the page's 3.11.13 figure. 3.11.16
 ships tcl9 and tk9 rather than tcl8, and both `bin/python3.11` and
 `lib/libpython3.11.dylib` are 18 MB each in this build.
 
-**18 MB of the 56 is a library nothing links against.** `otool -L` on the
-interpreter and on both remaining extension modules shows none of them reference
-`libpython3.11.dylib`: python-build-standalone statically links the interpreter.
-`node scripts/stage-runtime.mjs --drop-unused-dylib` removes it, which would take
-the disk image to somewhere near the page's projection. It is **off by default**,
-because an app that embeds Python rather than running `python3` would want that
-library, and the decision to drop it is Jason's rather than mine. No app in the
-catalog embeds Python today.
+**The 18 MB `libpython3.11.dylib` is dropped, and that is the difference between
+32.8 MB and 25.2 MB.** `otool -L` on the interpreter and on both remaining
+extension modules shows none of them reference it: python-build-standalone links
+the interpreter statically. Dropping it is now the default and
+`--keep-dylib` brings it back, for the day an app ships a compiled extension
+that wants to embed Python. No app in the catalog does today.
+
+The bundle without it still works, which is the point of dropping it rather than
+arguing about it: `farm --version` answers `farm 0.1.12` from inside the app, and
+the ten check gate ran again on that bundle and installed, started, listed and
+stopped a real app against the real Tiiny.
+
+Dropping it also changes how many Mach-O files have to be signed, from four to
+three, so that number is no longer written down anywhere. The staging script
+counts them by reading the first four bytes of every file and records the count
+in `runtime.json`; `sign-runtime.sh` refuses unless it signed exactly that many,
+and the workflow refuses unless it verified exactly that many inside the built
+bundle. A number typed into a workflow goes stale the first time a runtime
+release changes what it ships, and the failure that causes is an unsigned file
+inside a signed bundle.
 
 Bytecode caches were measured rather than guessed at. Keeping them costs 23 MB
 and saves nothing: `farm --version` is 0.03 s to 0.04 s with or without them,
@@ -197,12 +211,14 @@ Both are written and both are one branch away from the state that was seen, but
 neither has been on screen, and a picture of one would have to be staged rather
 than met.
 
-That command is in farm 0.1.12, which had not published when this was written.
-Until it does, `scripts/runtime.pins.json` carries `farmFrom` and the engine is
-installed from the commit the finder was written on,
-`Titanium-Devops/tiinyapp-farm@7e4cce6` (PR 30, branch `device-find`), as a git
-URL rather than a path, so a runner that has never seen this Mac builds the same
-thing. Deleting `farmFrom` and setting
+That command is in farm 0.1.12, which published while this was being built. The
+engine is pinned to `0.1.12` from PyPI and `farmFrom` is gone; everything above
+was measured against that pin. While it was unpublished the pin was the public
+commit the finder was written on, as a git URL rather than a path so that a
+runner that has never seen this Mac built the same thing, and CI proved that
+worked before the repin. **farm 0.1.13 published later the same hour**, which the
+launcher's own doctor pointed out on screen; nothing here has run against it, and
+moving to it is one line in `scripts/runtime.pins.json`. Deleting `farmFrom` and setting
 `farm` to `0.1.12` is the whole of the repin, and the Settings pane says
 `built from <path>` for as long as it is a worktree, so nothing can quietly
 claim a published version it is not.
@@ -247,45 +263,140 @@ above show is the grant working and its absence failing, which is the behaviour
 either side of the prompt. Seeing the prompt itself needs a machine that has
 never run this bundle identifier, and it belongs in the beta.
 
-### 2.7 One interpreter, and only one
+### 2.7 One interpreter, and only one. Fixed, and proved.
 
-A single grant to "Tiiny App Farm" has to cover finding the device, the doctor,
-and every app the launcher starts. That only holds if there is exactly one
-interpreter, so the launcher makes sure of it in two ways.
+A single local network grant to "Tiiny App Farm" has to cover finding the
+device, the doctor, and every app the launcher starts. That only holds if there
+is exactly one interpreter, and the CLI's own fallback is what breaks it: when
+macOS refuses a Python the local network, the farm walks the other Pythons on
+the machine, keeps the first that gets through, and **saves it** in
+`~/.tiinyapps/settings.json`, where every later command reads it. A launcher
+that inherited that would run apps under a Homebrew Python nobody has granted
+anything.
 
-`farm start` is always given `--python <the bundled interpreter>`, which both
-names it and stops the engine walking to another one.
+Two things stop it, and both are in.
 
-The other way matters more, because the CLI's fallback is right for somebody at
-a terminal and wrong here: when macOS refuses a Python the local network, the
-farm tries the other Pythons on the machine, keeps the first that gets through,
-and **saves it** in `~/.tiinyapps/settings.json`, where every later command
-reads it. A launcher that inherited that setting would run apps under a
-Homebrew Python nobody has granted anything, and they would fail to reach the
-Tiiny for a reason the person cannot see. So the launcher puts that setting back
-to the bundled interpreter before and after every engine call.
+**`farm start` is always given `--python <the bundled interpreter>`.** That wins
+over the saved setting and, more to the point, skips the walk entirely:
+`Farm.start` only calls `choose_python` when no `--python` was passed
+(`if interpreter and not python:` in `farm/farm.py`).
 
-Measured, in that order:
+**The saved setting is put back before and after every engine call.** `device`
+and `doctor` have no `--python` flag, so the setting is the only lever there.
+`Engine::pin_interpreter` rewrites it, keeping every other key, and
+`Engine::run` calls it on both sides of the child.
+
+The exact run asked for, on this Mac, in a scratch home:
 
 | | |
 | --- | --- |
-| A foreign interpreter written into the settings file by hand | `"python": "/usr/bin/python3"` |
-| After one command from inside the launcher | `"python": ".../Tiiny App Farm.app/Contents/Resources/runtime/bin/python3.11"` |
+| Put on file by hand, which is what a refused probe leaves | `"python": "/opt/homebrew/bin/python3"` |
+| Story Lantern then started from the launcher's own Start button | |
+| `ps` | `~/Applications/Tiiny App Farm.app/Contents/Resources/runtime/bin/python3.11 lantern.py` |
+| `settings.json` afterwards | `.../Tiiny App Farm.app/Contents/Resources/runtime/bin/python3.11`, and no Homebrew path |
 | Every other key in that file | untouched |
-| The Story Lantern the launcher started, in `ps` | `.../Tiiny App Farm.app/Contents/Resources/runtime/bin/python3.11 lantern.py` |
-| What that app wrote in its own log | `device http://172.17.7.177:80  found by TIINY_BASE` |
 
-The last two rows are the point: the app the launcher started ran under the
-bundled interpreter and reached the Tiiny. For contrast, Jason's own Story
-Lantern was running beside it the whole time under Xcode's Python 3.9, which is
-why port 8420 was taken and the engine moved the launcher's copy to 8421.
+The same holds for a command with no flag: a foreign interpreter written in by
+hand is replaced on the launcher's next engine call, within the eight second
+status poll, without anybody pressing anything.
+
+For contrast, Jason's own Story Lantern ran beside all of this the whole time
+under Xcode's Python 3.9, which is why port 8420 was taken and the engine moved
+the launcher's copy to 8421. The launcher never touched it.
 
 Pinning a shared setting is a real consequence and it is worth saying plainly:
-the launcher writes into the same `~/.tiinyapps` the CLI reads, so a person who
+the launcher writes into the same `~/.tiinyapps` the CLI reads, so somebody who
 uses both will find the interpreter pointing inside the app bundle. That is
 stable while the app is installed and harmless once it is not, because
 `Farm.app_python` only takes a saved interpreter that is still runnable and
-falls back to its own otherwise.
+falls back to its own otherwise. If the engine ever grows a way to forbid the
+walk from outside, a `FARM_PYTHON_PINNED` or the like, the launcher should use
+it and this reconciliation should go.
+
+### 2.7b The microphone, the camera, and what was not seen
+
+`NSMicrophoneUsageDescription` and `NSCameraUsageDescription` are in the built
+`Info.plist`, and `com.apple.security.device.audio-input` and
+`com.apple.security.device.camera` are in the entitlements the app is signed
+with. At the web layer wry grants capture permission itself
+(`WKPermissionDecision::Grant` in `wry_web_view_ui_delegate.rs`), so no
+page-level prompt stands in the way; what remains is the macOS prompt the first
+time something opens the device.
+
+**That prompt was not seen, and the reason is worth reading.** Titanium Tiiny
+Bot was installed, started on port 7790 and opened in its own window; its
+console loaded and Titan answered in it. Holding its Talk button for two and a
+half seconds produced this, in the app's own words:
+
+```
+Cannot reach the device. Check its address and that its model is running.
+```
+
+Its voice path refuses before it reaches `getUserMedia`, because the voice model
+is not running on this Tiiny. The privacy database has no entry of any kind for
+`farm.tiinyapp.launcher`, which says the same thing from the other side: nothing
+asked for the microphone, so nothing was prompted. The plumbing is in and
+unproven, and it needs a Tiiny with a voice model on it.
+
+### 2.7c The key: one masked field, and no second way in
+
+The device pane takes the key one way. The person copies it from TiinyOS, pastes
+it into a masked field, and the launcher writes it by piping it to
+`farm device --base <url> --key-stdin`. It is never an argument, never an
+environment variable, never in a log, and it is never shown again. The caption
+under the field says so in plain words: "Copy it from TiinyOS, Settings, API
+Key. Saved on this computer, only you can read it, and it is never shown again."
+
+**There is no field that asks for a path to a key file, anywhere.** There was
+one, and it is gone: the input, the dialog, the Rust command behind it and the
+example in the README. A path field is a second way in and it teaches somebody
+to leave their key lying about in a file. `scripts/verify-launcher.mjs` still
+reads a key file, because a gate has to come from somewhere, and it pipes it
+into the engine itself on the command line of the test, outside the app.
+
+Measured, through the window, on a fresh scratch home: the masked field took a
+stand-in string and the launcher wrote `device.json` with the right base, a key
+of the right length and mode 0600. The real key was then put on file by the gate
+script for the rest of the run, so it never went near a clipboard or a
+keystroke. `docs/shots/01-first-run.png` is that pane, with the field masked.
+
+### 2.7d A window per app
+
+Open puts a running app in its own window rather than taking a tab from whatever
+somebody was doing. One window per app, labelled `app:<id>` so it can never
+collide with the launcher's own, titled with the app's name, sized and placed
+where it was last left. "In browser" is on every row and on every card, and a
+Settings switch makes the browser the default.
+
+An app's window is that app. A link to any other origin goes to the system
+browser, because the window has no address bar and nobody could tell where they
+had ended up. Downloads go to the Downloads folder. The window is not in any
+Tauri capability, so the page inside it cannot call a single launcher command.
+
+Measured on this Mac, all three apps from the launcher's own buttons:
+
+| | |
+| --- | --- |
+| Daybreak, live news over SSE | its own window, port 8811 |
+| Story Lantern | its own window, port 8421 |
+| Titanium Tiiny Bot | its own window, port 7790 |
+| Closing the bot's window | all three apps still running |
+| Pressing Open again | the window came back at 728,148 at 1000 by 761, exactly where it was left |
+| Pressing Open once more | still one window, not two |
+
+The bot is on 7790 rather than its declared 7788 because this run was told to
+keep off that port. It is a movable app, so `--port` was enough, and that is how
+it was started.
+
+localStorage is per app because each app is a different origin, which is what a
+different port makes it. One caveat, honestly: the port can change between runs
+when the engine moves an app off a busy one, and an app that moves loses what it
+kept. Nothing was done about that, and it is worth a decision before the beta.
+
+External links were not clicked live, because the click would have opened a
+website on somebody's screen. The rule has six tests against real cases in
+`src-tauri/src/appwindow.rs`, including the one that catches a lazy prefix
+check: `http://localhost:84210` is not inside `http://localhost:8421`.
 
 ### 2.8 Failure, in words
 
@@ -323,10 +434,11 @@ they are what the screenshots were measured at.
 
 ### 2.10 Tests
 
-42 Rust tests, `cargo clippy --all-targets -- -D warnings` clean, `cargo fmt
+57 Rust tests, `cargo clippy --all-targets -- -D warnings` clean, `cargo fmt
 --check` clean. The JSON reader, the progress reader, the state machine, the
-failure classifier, the settings file and the deep link parser have no window
-behind them, so this is a real test run rather than a compile check.
+failure classifier, the interpreter pin, the window registry and the rule about
+where an app window may navigate all have no window behind them, so this is a
+real test run rather than a compile check.
 
 Three defects were found by something other than me reading the code.
 
@@ -412,18 +524,6 @@ for remove through the bundled CLI, so the launcher runs it as prose and shows
 the sentence it prints. This works and is honest, but it is the one command whose
 result the launcher reads as English rather than as a structure. Adding `--json`
 to remove in a later farm release would close it.
-
-**The device pane can read the key from a file.** The design has one way in,
-pasting it. There are now two: pasting, and naming a file the launcher opens
-itself. The second exists because the key has to reach the engine without ever
-being on a clipboard or in a screenshot, and it is what makes the gate honest.
-It is one extra button and it declares exactly what it does.
-
-**The engine is installed from a worktree, not from PyPI, for now.** The
-finder lands in farm 0.1.12 and 0.1.12 has not published. `farmFrom` in
-`scripts/runtime.pins.json` points at the branch it was written on, the
-Settings pane says so on screen, and the repin is deleting one line and
-changing a version. Nothing else in the repository names a version.
 
 **`farm` on the PATH is a stub.** The switch is in Settings, remembers its
 answer, and says in the window that the doing of it lands later. The brief allows

@@ -51,6 +51,18 @@ function say(words) {
 }
 
 // Views -----------------------------------------------------------------
+// The launcher and the command line tool share one directory, so what is
+// installed can change without the window doing anything. Reading it again when
+// somebody comes back to the window, or moves to a pane that shows it, is what
+// keeps the Running pane from saying nothing is planted while three apps are.
+let lastRead = 0;
+async function reread(force) {
+  if (!farm.info) return;
+  if (!force && Date.now() - lastRead < 8000) return;
+  lastRead = Date.now();
+  await refresh();
+}
+
 function show(view) {
   for (const name of ["farm", "running", "settings"]) {
     $(`view-${name}`).hidden = name !== view;
@@ -58,8 +70,9 @@ function show(view) {
   }
 }
 for (const button of document.querySelectorAll("nav button")) {
-  button.addEventListener("click", () => show(button.dataset.view));
+  button.addEventListener("click", () => { show(button.dataset.view); reread(); });
 }
+window.addEventListener("focus", () => reread());
 $("go-farm").addEventListener("click", () => show("farm"));
 for (const button of document.querySelectorAll("[data-close]")) {
   button.addEventListener("click", () => $(button.dataset.close).close());
@@ -144,6 +157,7 @@ function renderInstalled() {
       actions.append(el("span", { class: "chip", text: "Working" }));
     } else if (live) {
       actions.append(el("button", { class: "btn small", type: "button", onclick: () => open(row.id) }, document.createTextNode("Open")));
+      actions.append(el("button", { class: "btn quiet", type: "button", onclick: () => openInBrowser(row.id) }, document.createTextNode("In browser")));
       actions.append(el("button", { class: "btn ghost small", type: "button", onclick: () => stop(row.id) }, document.createTextNode("Stop")));
     } else {
       const runnable = !manifest || manifest.entry !== null;
@@ -292,6 +306,7 @@ function renderCardState() {
   }
   if (live) {
     actions.append(el("button", { class: "btn", type: "button", onclick: () => open(id) }, document.createTextNode("Open")));
+    actions.append(el("button", { class: "btn quiet", type: "button", onclick: () => openInBrowser(id) }, document.createTextNode("In browser")));
     actions.append(el("button", { class: "btn ghost", type: "button", onclick: () => stop(id) }, document.createTextNode("Stop")));
   } else if (!manifest || manifest.entry !== null) {
     actions.append(el("button", { class: "btn", type: "button", onclick: () => start(id) }, document.createTextNode("Start")));
@@ -392,7 +407,22 @@ async function remove(id) {
   await refresh();
 }
 
+// Open puts the app in its own window, with its own name on it, rather than
+// taking a tab from whatever somebody was doing. The browser is still there as
+// a second way out, and a setting makes it the first.
 async function open(id) {
+  try {
+    const answer = await invoke("open_app", { id, name: nameOf(id) });
+    if (answer.where === "browser") say(`${nameOf(id)} is open in your browser.`);
+  } catch (error) {
+    readTrouble(id, error);
+    renderCardState();
+    renderInstalled();
+    say(sentence(error));
+  }
+}
+
+async function openInBrowser(id) {
   const live = farm.running.find((r) => r.id === id);
   if (!live || !live.url) { say("That app has not said which port it took yet."); return; }
   try { await invoke("open_external", { url: live.url }); }
@@ -488,7 +518,7 @@ async function lookForTiinys() {
 function useTiiny(row) {
   chosenBase = row.base;
   $("device-base").value = row.base;
-  $("device-key-for").textContent = row.name || row.serial || row.address;
+  $("device-key-label").textContent = `API key for ${row.name || row.serial || row.address}`;
   $("device-key-step").hidden = false;
   $("device-key").focus();
 }
@@ -497,26 +527,11 @@ async function saveDevice() {
   const base = ($("device-base").value || chosenBase || "").trim();
   const key = $("device-key").value;
   if (!base) { say("Pick a Tiiny, or type its address in yourself."); return; }
-  if (!key.trim()) { say("Paste the key from TiinyOS, Settings, API Key."); return; }
+  if (!key.trim()) { say("Paste the key. It is in TiinyOS, under Settings, API Key."); return; }
   try {
     farm.device = await invoke("device_save", { base, key });
     $("device-key").value = "";
-    say("The key is saved. It is not shown again.");
-    await refresh();
-  } catch (error) {
-    say(sentence(error));
-  }
-}
-
-async function saveDeviceFromFile() {
-  const base = ($("device-base").value || chosenBase || "").trim();
-  const path = $("keyfile-path").value.trim();
-  if (!base) { say("Pick a Tiiny first, or type its address in yourself."); return; }
-  if (!path) { say("Name the file the key is in."); return; }
-  try {
-    farm.device = await invoke("device_save_from_file", { base, path });
-    $("keyfile").close();
-    say("The key is saved from that file. It was never shown.");
+    say("Saved. The key is on this computer now, and it is not shown again.");
     await refresh();
   } catch (error) {
     say(sentence(error));
@@ -530,12 +545,10 @@ $("device-manual-toggle").addEventListener("click", () => {
   manual.hidden = !manual.hidden;
   if (!manual.hidden) {
     $("device-key-step").hidden = false;
-    $("device-key-for").textContent = "your Tiiny";
+    $("device-key-label").textContent = "API key for your Tiiny";
     $("device-base").focus();
   }
 });
-$("device-file").addEventListener("click", () => $("keyfile").showModal());
-$("keyfile-save").addEventListener("click", saveDeviceFromFile);
 $("settings-device-change").addEventListener("click", () => {
   show("farm");
   $("device-banner").hidden = false;
@@ -550,6 +563,7 @@ function renderSettings() {
     : "No Tiiny is on file yet, so no app can reach one.";
   $("toggle-autostart").setAttribute("aria-checked", String(farm.settings.autostart));
   $("toggle-path").setAttribute("aria-checked", String(farm.settings.farmOnPath));
+  $("toggle-browser").setAttribute("aria-checked", String(farm.settings.openInBrowser));
 
   const mb = (n) => `${(n / 1024 / 1024).toFixed(1)} MB`;
   const about = $("about");
@@ -572,6 +586,7 @@ function renderSettings() {
 
 $("toggle-autostart").addEventListener("click", () => flip("autostart"));
 $("toggle-path").addEventListener("click", () => flip("farmOnPath"));
+$("toggle-browser").addEventListener("click", () => flip("openInBrowser"));
 
 async function flip(key) {
   const next = { ...farm.settings, [key]: !farm.settings[key] };
@@ -664,6 +679,7 @@ async function refresh() {
   // search is also what makes macOS ask about the local network, and this is
   // the screen where that question makes sense.
   if (!farm.device.configured && wasHidden) lookForTiinys();
+  lastRead = Date.now();
   renderCatalog();
   renderInstalled();
   renderSettings();

@@ -38,13 +38,12 @@
         </div>
 
         <div id="device-key-step" hidden style="margin-top:16px;border-top:1px solid var(--fence);padding-top:16px">
-          <label class="field">API key for <span id="device-key-for">your Tiiny</span>
-            <input id="device-key" type="password" spellcheck="false" autocomplete="off" placeholder="From TiinyOS, Settings, API Key">
-            <small>It is written to the device file at mode 0600 and never shown again.</small>
+          <label class="field"><span id="device-key-label">API key for your Tiiny</span>
+            <input id="device-key" type="password" spellcheck="false" autocomplete="off" placeholder="Paste it here">
+            <small>Copy it from TiinyOS, Settings, API Key. Saved on this computer, only you can read it, and it is never shown again.</small>
           </label>
           <div class="row">
             <button class="btn" type="button" id="device-save">Save the key</button>
-            <button class="btn quiet" type="button" id="device-file">Read the key from a file</button>
           </div>
         </div>
       </div>
@@ -98,6 +97,10 @@
         <div class="switch">
           <div><b>Put <code>farm</code> on the PATH</b><span id="path-note">Adds the command line tool to your shell. Nothing here needs it.</span></div>
           <button class="toggle" type="button" id="toggle-path" role="switch" aria-checked="false" aria-label="Put farm on the PATH"></button>
+        </div>
+        <div class="switch">
+          <div><b>Open apps in your browser</b><span>Off, an app opens in its own window with its own name on it. On, Open hands it to your browser instead. Either way there is an In browser button on every app.</span></div>
+          <button class="toggle" type="button" id="toggle-browser" role="switch" aria-checked="false" aria-label="Open apps in your browser"></button>
         </div>
       </div>
 
@@ -159,26 +162,6 @@
       <pre class="log" id="logs-body"></pre>
       <div class="sheet-foot">
         <button class="btn ghost" type="button" data-close="logs">Close</button>
-      </div>
-    </div>
-  </dialog>
-
-  <!-- The key file -------------------------------------------------- -->
-  <dialog id="keyfile">
-    <div class="sheet-head">
-      <div>
-        <h2>Read the key from a file</h2>
-        <div class="sub">The launcher opens the file itself. The key is never shown, never copied and never written anywhere but the device file.</div>
-      </div>
-      <button class="sheet-close" type="button" data-close="keyfile" aria-label="Close">&times;</button>
-    </div>
-    <div class="sheet-body">
-      <label class="field">Path to the key file
-        <input id="keyfile-path" type="text" spellcheck="false" autocomplete="off" placeholder="/Users/you/.tiiny_1_api_key">
-      </label>
-      <div class="sheet-foot">
-        <button class="btn" type="button" id="keyfile-save">Use this file</button>
-        <button class="btn ghost" type="button" data-close="keyfile">Cancel</button>
       </div>
     </div>
   </dialog>

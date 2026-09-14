@@ -4,6 +4,7 @@
 //! its engine. Nothing here decides what an install means; the engine does,
 //! and this draws the answer.
 
+pub mod appwindow;
 pub mod catalog;
 pub mod engine;
 pub mod progress;
@@ -26,6 +27,8 @@ use settings::Settings;
 pub struct Launcher {
     pub engine: Engine,
     pub settings: Mutex<Settings>,
+    /// Where each app's window was last left, so it comes back the same size.
+    pub frames: Mutex<appwindow::Frames>,
     /// An app id handed to the launcher by a `tiinyfarm://install/<id>` link
     /// before the window was ready to hear about it.
     pub pending_deep_link: Mutex<Option<String>>,
@@ -294,45 +297,19 @@ async fn device_probe(base: Option<String>) -> catalog::Probe {
     catalog::probe(&address).await
 }
 
-/// Save the Tiiny's address and key. The key goes down the engine's standard
-/// input and is dropped as soon as it has been written: it is never an
-/// argument, never an environment variable, and never in a log.
+/// Save the Tiiny's address and key. There is one way in and this is it: the
+/// person pastes the key, and it goes down the engine's standard input and is
+/// dropped as soon as it has been written. It is never an argument, never an
+/// environment variable, never in a log, and the window never shows it again.
+///
+/// There is deliberately no way to hand the launcher a path to a key file. A
+/// path field is a second way in that teaches somebody to leave their key
+/// lying about in a file, and the test harness that needs one
+/// (`scripts/verify-launcher.mjs`) pipes it into the engine itself, outside
+/// the app.
 #[tauri::command]
 async fn device_save(app: tauri::AppHandle, base: String, key: String) -> Answer<DeviceState> {
     on_engine(app.clone(), move |engine| engine.device(&base, &key)).await?;
-    let state = device_current(app.state::<Launcher>());
-    let _ = app.emit("apps:changed", ());
-    Ok(state)
-}
-
-/// The same thing, with the key read out of a file this process opens itself.
-/// TiinyOS can write the key out rather than have somebody read it off a
-/// screen, and a key that is never on a clipboard is a key that never ends up
-/// somewhere else.
-#[tauri::command]
-async fn device_save_from_file(
-    app: tauri::AppHandle,
-    base: String,
-    path: String,
-) -> Answer<DeviceState> {
-    let file = PathBuf::from(&path);
-    on_engine(app.clone(), move |engine| {
-        let key = std::fs::read_to_string(&file).map_err(|_| {
-            EngineError::plain(format!(
-                "There is no readable key file at {}.",
-                file.display()
-            ))
-        })?;
-        let key = key.trim().to_string();
-        if key.is_empty() {
-            return Err(EngineError::plain(format!(
-                "The file at {} is empty.",
-                file.display()
-            )));
-        }
-        engine.device(&base, &key)
-    })
-    .await?;
     let state = device_current(app.state::<Launcher>());
     let _ = app.emit("apps:changed", ());
     Ok(state)
@@ -392,6 +369,183 @@ fn open_external(app: tauri::AppHandle, url: String) -> Result<(), String> {
     app.opener()
         .open_url(url, None::<&str>)
         .map_err(|error| format!("That link would not open: {error}."))
+}
+
+/// Open a running app in its own window, or bring its window back.
+///
+/// One window per app, labelled with the app id, so pressing Open twice brings
+/// the same window forward rather than making a second one. Closing it does not
+/// stop the app: the app is the engine's process and the window is only a way
+/// of looking at it.
+#[tauri::command]
+async fn open_app(app: tauri::AppHandle, id: String, name: Option<String>) -> Answer<Value> {
+    let in_browser = app
+        .state::<Launcher>()
+        .settings
+        .lock()
+        .map(|held| held.open_in_browser)
+        .unwrap_or(false);
+
+    let wanted = id.clone();
+    let status = on_engine(app.clone(), move |engine| {
+        engine.json(&["status"], Budget::QUICK)
+    })
+    .await?;
+    let url = tray::rows_from(&status)
+        .into_iter()
+        .find(|row| row.id == wanted)
+        .and_then(|row| row.url)
+        .ok_or_else(|| {
+            EngineError::plain(format!(
+                "{wanted} is not running, so there is nothing to open yet. Press Start first."
+            ))
+        })?;
+
+    if in_browser {
+        open_external(app, url.clone()).map_err(EngineError::plain)?;
+        return Ok(json!({"id": id, "url": url, "where": "browser"}));
+    }
+    let title = name.unwrap_or_else(|| id.clone());
+    show_app_window(&app, &id, &title, &url)?;
+    Ok(json!({"id": id, "url": url, "where": "window"}))
+}
+
+/// Build the window, or raise the one that is already there.
+fn show_app_window(
+    app: &tauri::AppHandle,
+    id: &str,
+    title: &str,
+    url: &str,
+) -> Result<(), EngineError> {
+    let label = appwindow::label_for(id);
+    if let Some(window) = app.get_webview_window(&label) {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+        return Ok(());
+    }
+
+    let origin = appwindow::origin_of(url).ok_or_else(|| {
+        EngineError::plain(format!(
+            "{id} is answering at {url}, which is not an address on this computer, so the launcher will not open a window on it."
+        ))
+    })?;
+    let parsed = tauri::Url::parse(url).map_err(|_| {
+        EngineError::plain(format!("{id} gave a link the launcher cannot read: {url}."))
+    })?;
+
+    let launcher = app.state::<Launcher>();
+    let frame = launcher.frames.lock().ok().and_then(|held| held.sane(id));
+    let downloads = app.path().download_dir().ok();
+
+    let opener = app.clone();
+    let inside = origin.clone();
+    let mut builder = tauri::WebviewWindowBuilder::new(app, &label, WebviewUrl::External(parsed))
+        .title(title)
+        .resizable(true)
+        .min_inner_size(400.0, 320.0)
+        // An app's window is that app. A link somewhere else opens in the
+        // system browser, because this window has no address bar and nobody
+        // could tell where they had ended up.
+        .on_navigation(move |going| {
+            if appwindow::stays_inside(&inside, going.as_str()) {
+                return true;
+            }
+            use tauri_plugin_opener::OpenerExt;
+            let _ = opener.opener().open_url(going.to_string(), None::<&str>);
+            false
+        })
+        // A download goes to the Downloads folder, where somebody will look for
+        // it, rather than wherever the web view would otherwise have put it.
+        .on_download(move |_, event| {
+            if let tauri::webview::DownloadEvent::Requested { url, destination } = event {
+                if let Some(dir) = &downloads {
+                    let named = url
+                        .path_segments()
+                        .and_then(|mut parts| parts.next_back())
+                        .filter(|name| !name.is_empty() && !name.contains(['/', '\\']))
+                        .unwrap_or("download")
+                        .to_string();
+                    *destination = dir.join(named);
+                }
+            }
+            true
+        });
+    if let Some(frame) = frame {
+        builder = builder
+            .inner_size(frame.width, frame.height)
+            .position(frame.x, frame.y);
+    } else {
+        builder = builder
+            .inner_size(appwindow::FIRST_TIME.0, appwindow::FIRST_TIME.1)
+            .center();
+    }
+
+    let window = builder.build().map_err(|error| {
+        EngineError::plain(format!("{id} could not be given a window: {error}."))
+    })?;
+
+    // Where it was left, kept as it moves, written out when it closes. Closing
+    // a window is not stopping an app, so nothing else happens here.
+    let remembering = app.clone();
+    let remembered = id.to_string();
+    let watched = window.clone();
+    window.on_window_event(move |event| {
+        if !matches!(
+            event,
+            tauri::WindowEvent::Moved(_)
+                | tauri::WindowEvent::Resized(_)
+                | tauri::WindowEvent::CloseRequested { .. }
+        ) {
+            return;
+        }
+        let (Ok(size), Ok(position), Ok(scale)) = (
+            watched.inner_size(),
+            watched.outer_position(),
+            watched.scale_factor(),
+        ) else {
+            return;
+        };
+        let frame = appwindow::Frame {
+            width: size.width as f64 / scale,
+            height: size.height as f64 / scale,
+            x: position.x as f64 / scale,
+            y: position.y as f64 / scale,
+        };
+        let closing = matches!(event, tauri::WindowEvent::CloseRequested { .. });
+        let where_to = {
+            let launcher = remembering.state::<Launcher>();
+            let Ok(mut held) = launcher.frames.lock() else {
+                return;
+            };
+            held.remember(&remembered, frame);
+            closing.then(|| (held.clone(), launcher.engine.config_dir()))
+        };
+        if let Some((held, config)) = where_to {
+            let _ = held.write(&config);
+        }
+    });
+
+    // The app's own icon, where the platform shows one. macOS puts the
+    // application's icon on every window of an application and ignores this,
+    // which is why it is a best effort rather than a step that can fail.
+    let ident = id.to_string();
+    let decorated = window.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Some(icon) = catalog::icon_bytes(&ident).await {
+            if let Ok(image) = tauri::image::Image::from_bytes(&icon) {
+                let _ = decorated.set_icon(image);
+            }
+        }
+    });
+    Ok(())
+}
+
+/// Which apps have a window open right now, so the grid can say Open or Show.
+#[tauri::command]
+fn open_app_windows(app: tauri::AppHandle) -> Vec<String> {
+    let windows = app.webview_windows();
+    appwindow::open_ids(windows.keys().map(String::as_str))
 }
 
 #[tauri::command]
@@ -480,11 +634,12 @@ pub fn run() {
             device_current,
             device_probe,
             device_save,
-            device_save_from_file,
             settings_read,
             settings_write,
             take_deep_link,
             open_external,
+            open_app,
+            open_app_windows,
             show_window,
         ])
         .setup(|app| {
@@ -499,9 +654,11 @@ pub fn run() {
                 }
             }
             let held = Settings::read(&engine.config_dir());
+            let frames = appwindow::Frames::read(&engine.config_dir());
             app.manage(Launcher {
                 engine,
                 settings: Mutex::new(held.clone()),
+                frames: Mutex::new(frames),
                 pending_deep_link: Mutex::new(None),
             });
             apply_autostart(&handle, held.autostart);

@@ -110,6 +110,30 @@ pub async fn probe(base: &str) -> Probe {
     }
 }
 
+/// One app's icon, as PNG bytes, for the window the launcher opens on it.
+///
+/// Best effort on purpose: a window with the wrong icon is a small thing and a
+/// window that would not open because an icon did not download is not.
+pub async fn icon_bytes(id: &str) -> Option<Vec<u8>> {
+    let manifest = manifest(id).await.ok()?;
+    let path = manifest.get("media")?.get("icon")?.as_str()?;
+    let url = if path.starts_with("http") {
+        path.to_string()
+    } else {
+        format!("{SITE}{path}")
+    };
+    let response = client(Duration::from_secs(15))
+        .ok()?
+        .get(&url)
+        .send()
+        .await
+        .ok()?;
+    if !response.status().is_success() {
+        return None;
+    }
+    Some(response.bytes().await.ok()?.to_vec())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

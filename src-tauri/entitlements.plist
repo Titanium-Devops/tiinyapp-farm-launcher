@@ -10,6 +10,15 @@
     <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
     <true/>
 
+    <!-- The hardened runtime denies the microphone and the camera unless the
+         app asks for them here, and an app the launcher opened in its own
+         window asks through this application. Without these the system prompt
+         never appears and the request is denied with nothing said. -->
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
+    <key>com.apple.security.device.camera</key>
+    <true/>
+
     <!-- The launcher's whole job is to run a Python it carries. Without this
          the hardened runtime refuses to execute the bundled interpreter as a
          child of a signed app. -->

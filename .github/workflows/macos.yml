@@ -374,11 +374,13 @@ jobs:
                 ;;
             esac
           done < <(find "$RUNTIME" -type f ! -type l)
-          # The pruned tree has four: the interpreter, libpython, and two
-          # extension modules. A different number means the prune list and the
-          # runtime have drifted apart and the signing step may have missed one.
-          if [ "$seen" -ne 4 ]; then
-            echo "::error::Expected 4 Mach-O files inside the bundled Python and verified $seen. Either the runtime changed or scripts/sign-runtime.sh did not reach all of them."
+          # Against what the staging script counted, not against a number typed
+          # here: a number typed here goes stale the first time a runtime
+          # release changes what it ships, and the failure that causes is an
+          # unsigned file inside a signed bundle.
+          want=$(node -p "require('./src-tauri/runtime/runtime.json').machO")
+          if [ "$seen" -ne "$want" ]; then
+            echo "::error::The staged Python has $want Mach-O files and $seen verified inside the bundle. Either the runtime changed or scripts/sign-runtime.sh did not reach all of them."
             exit 1
           fi
           if [ "${{ steps.gate.outputs.notarize }}" = "true" ]; then

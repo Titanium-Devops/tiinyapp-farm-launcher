@@ -168,24 +168,22 @@ fn on_menu(app: &AppHandle, id: &str) {
                 let engine = handle.state::<Launcher>().engine.clone();
                 let ident_for_open = ident.clone();
                 let verb_for_work = verb.clone();
-                let done =
-                    tauri::async_runtime::spawn_blocking(move || match verb_for_work.as_str() {
-                        "stop" => engine.json(&["stop", &ident], Budget::PATIENT),
-                        "update" => engine.json(&["update", &ident, "--yes"], Budget::DOWNLOAD),
-                        _ => engine.json(&["status"], Budget::QUICK),
+                // Open needs no work of its own: it goes through the same
+                // door the grid uses, below.
+                if verb != "open" {
+                    let _ = tauri::async_runtime::spawn_blocking(move || {
+                        match verb_for_work.as_str() {
+                            "stop" => engine.json(&["stop", &ident], Budget::PATIENT),
+                            "update" => engine.json(&["update", &ident, "--yes"], Budget::DOWNLOAD),
+                            _ => Ok(serde_json::Value::Null),
+                        }
                     })
                     .await;
+                }
                 if verb == "open" {
-                    if let Ok(Ok(value)) = &done {
-                        if let Some(url) = rows_from(value)
-                            .into_iter()
-                            .find(|row| row.id == ident_for_open)
-                            .and_then(|row| row.url)
-                        {
-                            use tauri_plugin_opener::OpenerExt;
-                            let _ = handle.opener().open_url(url, None::<&str>);
-                        }
-                    }
+                    // The same door the window uses, so Open from the menu bar
+                    // and Open from the grid put somebody in the same place.
+                    let _ = crate::open_app(handle.clone(), ident_for_open, None).await;
                 }
                 use tauri::Emitter;
                 let _ = handle.emit("apps:changed", ());

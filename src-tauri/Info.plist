@@ -14,6 +14,17 @@
     <key>NSLocalNetworkUsageDescription</key>
     <string>The Tiiny App Farm looks for your Tiiny on the USB cable and on your network, and the apps it runs talk to the Tiiny the same way.</string>
 
+    <!-- An app the launcher opens gets its own window, and some of them ask
+         for the microphone or the camera: Titanium Tiiny Bot listens, Story
+         Lantern reads aloud. macOS attributes that to this application, the
+         same way it attributes the network, so the strings live here and name
+         the farm rather than the app that asked. They are shown once, to the
+         person, in the system prompt. -->
+    <key>NSMicrophoneUsageDescription</key>
+    <string>A farm app you opened wants the microphone, for talking to it. The Tiiny App Farm passes the request on and never listens on its own.</string>
+    <key>NSCameraUsageDescription</key>
+    <string>A farm app you opened wants the camera. The Tiiny App Farm passes the request on and never looks on its own.</string>
+
     <!-- NSBonjourServices is deliberately absent. It is only needed to browse
          or advertise an mDNS service, and the farm does neither: it reads its
          own side of each USB cable and works out the box's address by

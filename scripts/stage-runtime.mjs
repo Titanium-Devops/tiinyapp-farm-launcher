@@ -8,12 +8,14 @@
 //
 //   node scripts/stage-runtime.mjs                     the host target
 //   node scripts/stage-runtime.mjs --target x86_64-apple-darwin
-//   node scripts/stage-runtime.mjs --drop-unused-dylib
+//   node scripts/stage-runtime.mjs --keep-dylib
 //
-// The last flag removes lib/libpython3.11.dylib, which nothing in the pruned
-// tree links against and which is 18 MB. It is off by default because an app
-// that embeds Python rather than running python3 would want it, and no app in
-// the catalog does that today. See docs/LAUNCHER-1-REPORT.md.
+// lib/libpython3.11.dylib is 18 MB and nothing in the pruned tree links against
+// it: python-build-standalone links the interpreter statically, and neither
+// remaining extension module references it. It is dropped by default. An app
+// that embeds Python rather than running python3 would want it back, and no app
+// in the catalog does that today; --keep-dylib is how it comes back if one ever
+// does. See docs/LAUNCHER-1-REPORT.md.
 
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
@@ -138,6 +140,42 @@ function dropCaches(dir) {
   };
   walk(dir);
   return dropped;
+}
+
+// How many Mach-O files are in the tree, by reading the first four bytes of
+// each rather than shelling out to file(1).
+//
+// It goes in runtime.json so that the signing script and the workflow both
+// check against what was actually staged. A number written down in a workflow
+// goes stale the first time a runtime release changes what it ships, and the
+// failure that causes is an unsigned file inside a signed bundle, which is the
+// exact thing this app is shaped around.
+const MACH_O_MAGIC = new Set([0xfeedface, 0xfeedfacf, 0xcefaedfe, 0xcffaedfe, 0xcafebabe, 0xbebafeca]);
+
+function machOCount(dir) {
+  let found = 0;
+  const head = Buffer.alloc(4);
+  const walk = (at) => {
+    for (const entry of fs.readdirSync(at, { withFileTypes: true })) {
+      const full = path.join(at, entry.name);
+      if (entry.isSymbolicLink()) continue;
+      if (entry.isDirectory()) {
+        walk(full);
+        continue;
+      }
+      let fd;
+      try {
+        fd = fs.openSync(full, "r");
+        if (fs.readSync(fd, head, 0, 4, 0) === 4 && MACH_O_MAGIC.has(head.readUInt32BE(0))) found += 1;
+      } catch {
+        // Unreadable is not Mach-O for this purpose.
+      } finally {
+        if (fd !== undefined) fs.closeSync(fd);
+      }
+    }
+  };
+  walk(dir);
+  return found;
 }
 
 function measure(dir) {
@@ -279,14 +317,16 @@ async function main() {
   log(`cache    ${dropCaches(tree)} __pycache__ directories removed`);
   log(`links    ${dropLinks(tree)} symlinks removed`);
 
-  if (flag("--drop-unused-dylib") && !windows) {
+  if (!flag("--keep-dylib") && !windows) {
     for (const hit of expand(tree, "lib/libpython3.11.dylib")) {
       rm(hit);
-      log(`dylib    removed ${path.relative(tree, hit)}`);
+      log(`dylib    removed ${path.relative(tree, hit)}, which nothing in the tree links against`);
     }
   }
 
   const after = measure(tree);
+  // Counted before the tree is moved into place, because it is counted in it.
+  const machO = windows ? 0 : machOCount(tree);
 
   // Everything farm.py imports from the standard library, asked for by name.
   // A prune pattern that reaches one module too far is otherwise found at the
@@ -320,6 +360,7 @@ async function main() {
         stagedAt: new Date().toISOString(),
         files: after.files,
         bytes: after.bytes,
+        machO,
       },
       null,
       2,
@@ -332,6 +373,7 @@ async function main() {
   log(`target   ${target}`);
   log(`runtime  CPython ${pins.python.version} (${pins.python.release}), ${version}`);
   log(`size     ${mb(before.bytes)} MB in ${before.files} files became ${mb(after.bytes)} MB in ${after.files} files`);
+  if (!windows) log(`mach-o   ${machO} files have to be signed before the app around them is`);
   rm(work);
 }
 

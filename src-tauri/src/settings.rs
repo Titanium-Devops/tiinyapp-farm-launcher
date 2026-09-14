@@ -17,6 +17,12 @@ pub struct Settings {
     /// The address of the Tiiny somebody typed in by hand, so the next run
     /// does not ask again.
     pub manual_base: Option<String>,
+    /// Open an app in the system browser rather than in its own window. Off,
+    /// because a window with the app's name on it is what somebody expects of
+    /// an app, and taking a tab from whatever they were doing is not. Anybody
+    /// who would rather have their own extensions and their own history turns
+    /// this on, and Open in browser is on every row either way.
+    pub open_in_browser: bool,
 }
 
 impl Settings {
@@ -50,6 +56,7 @@ mod tests {
         let settings = Settings::default();
         assert!(!settings.autostart);
         assert!(!settings.farm_on_path);
+        assert!(!settings.open_in_browser);
         assert_eq!(settings.manual_base, None);
     }
 
@@ -72,6 +79,7 @@ mod tests {
             autostart: true,
             farm_on_path: false,
             manual_base: Some("http://172.17.7.177/v1".into()),
+            open_in_browser: true,
         };
         settings.write(&dir).unwrap();
         assert_eq!(Settings::read(&dir), settings);
