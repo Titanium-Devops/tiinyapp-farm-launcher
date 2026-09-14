@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- These entitlements are for the bundled interpreter, not for the app.
+         A farm app is somebody else's Python, and the hardened runtime is
+         strict about what somebody else's Python is allowed to do. -->
+
+    <!-- A wheel with a compiled extension in it is signed by whoever built
+         the wheel, or by nobody. Library validation would refuse to load it,
+         and the person would see an app that will not start with no way to
+         find out why. Nothing in the catalog needs this today; the first app
+         that ships a binary wheel will. -->
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+
+    <!-- ctypes and cffi build executable pages at run time. -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+</dict>
+</plist>

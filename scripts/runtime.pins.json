@@ -1,0 +1,26 @@
+{
+  "comment": "Everything the launcher carries inside itself, pinned. Change a number here and scripts/stage-runtime.mjs fetches something else; nothing else in the repository names a version.",
+  "farm": "0.1.13",
+  "python": {
+    "release": "20260901",
+    "version": "3.11.16",
+    "source": "https://github.com/astral-sh/python-build-standalone/releases/download/20260901/",
+    "targets": {
+      "aarch64-apple-darwin": {
+        "asset": "cpython-3.11.16+20260901-aarch64-apple-darwin-install_only.tar.gz",
+        "sha256": "50424fa409e8ae84b82a3052522f64695b47dff2158b70bb7358e0ebd6c085c9",
+        "size": 27087450
+      },
+      "x86_64-apple-darwin": {
+        "asset": "cpython-3.11.16+20260901-x86_64-apple-darwin-install_only.tar.gz",
+        "sha256": "167cc15cf4eeb72944a67bbd2f7120c45fded17d5043d5db64b3144d7adc30ae",
+        "size": 26979112
+      },
+      "x86_64-pc-windows-msvc": {
+        "asset": "cpython-3.11.16+20260901-x86_64-pc-windows-msvc-install_only.tar.gz",
+        "sha256": "6be524fa6752af802146a4adc7d098565425b0b1c166e19a5a7a4c8cccb86bf6",
+        "size": 47940627
+      }
+    }
+  }
+}

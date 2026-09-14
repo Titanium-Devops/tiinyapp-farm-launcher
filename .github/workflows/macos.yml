@@ -1,0 +1,518 @@
+name: macos
+
+on:
+  push:
+    branches: [main]
+  pull_request: {}
+  workflow_dispatch: {}
+
+# A newer push makes an older run pointless, and these runs are long. Let the
+# newest one win.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: cargo test (macos)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache cargo registry + target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: macos-cargo-test-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            macos-cargo-test-
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # tauri-build refuses to build at all when a declared resource path is
+      # not there, and `runtime` is not committed: it is fetched and staged.
+      # So the test job stages it too. That costs a minute and buys the thing
+      # that matters: the staging script is exercised on both platforms before
+      # the long bundle jobs start, which is how the prune pattern that ate
+      # Lib/threading.py on Windows was caught.
+      - name: Stage the bundled Python and the pinned farm
+        run: node scripts/stage-runtime.mjs
+
+      - name: cargo fmt
+        working-directory: src-tauri
+        run: cargo fmt --check
+
+      # The JSON reader, the progress reader and the state machine are plain
+      # Rust with no window behind them, so this is a real test run and not a
+      # compile check.
+      - name: cargo test
+        working-directory: src-tauri
+        run: cargo test
+
+      - name: cargo clippy
+        working-directory: src-tauri
+        run: cargo clippy --all-targets -- -D warnings
+
+  bundle:
+    name: macOS app (${{ matrix.arch }}, signed and notarised)
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: aarch64
+            target: aarch64-apple-darwin
+            feed_key: darwin-aarch64
+          - arch: x86_64
+            target: x86_64-apple-darwin
+            feed_key: darwin-x86_64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust for ${{ matrix.target }}
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo registry + target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: macos-cargo-${{ matrix.arch }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            macos-cargo-${{ matrix.arch }}-
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      # Node is here for the Tauri CLI and the staging script. The front end is
+      # plain files in ui/ with no build step.
+      - name: npm ci
+        run: npm ci
+
+      # THE APP IS NOT UNIVERSAL, AND THIS IS WHY. The reference desktop app
+      # builds one universal binary, but a bundled CPython is one architecture:
+      # python-build-standalone publishes an arm64 tree and an x86_64 tree and
+      # there is no fat one. Carrying both would put 56 MB of the wrong machine
+      # in every download. So the app is built once per architecture, and the
+      # updater feed names both, which is what its darwin-aarch64 and
+      # darwin-x86_64 keys are for.
+      - name: Stage the bundled Python and the pinned farm
+        run: node scripts/stage-runtime.mjs --target ${{ matrix.target }}
+
+      # SIGNING GUARDRAIL: a build signs only on a push to main, and only when
+      # the certificate secret is actually present. A pull request, a fork, and
+      # a repository with no secrets yet all produce an unsigned build that
+      # still has to compile and bundle. That is what makes this workflow worth
+      # running before anybody has added a single secret.
+      - name: Decide whether this run can sign
+        id: gate
+        env:
+          CERT: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+          NOTARY_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          ASC_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.APP_STORE_CONNECT_KEY_P8_BASE64 }}
+          UPDATER_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          on_main='${{ github.ref == 'refs/heads/main' }}'
+          sign=false
+          notarize=false
+          apikey=false
+          updater=false
+          if [ "$on_main" = "true" ] && [ -n "$CERT" ]; then sign=true; fi
+          # The App Store Connect key is the steadier of the two doors: it does
+          # not expire when somebody changes an Apple ID password. All three
+          # parts have to be there, because two of them is a submission that
+          # fails after the build rather than before it.
+          if [ "$sign" = "true" ] && [ -n "$ASC_KEY_ID" ] && [ -n "$ASC_ISSUER_ID" ] && [ -n "$ASC_KEY_P8" ]; then
+            notarize=true
+            apikey=true
+          elif [ "$sign" = "true" ] && [ -n "$NOTARY_PASSWORD" ]; then
+            notarize=true
+          fi
+          if [ "$on_main" = "true" ] && [ -n "$UPDATER_KEY" ]; then updater=true; fi
+          {
+            echo "sign=$sign"
+            echo "notarize=$notarize"
+            echo "apikey=$apikey"
+            echo "updater=$updater"
+          } >> "$GITHUB_OUTPUT"
+          echo "sign=$sign notarize=$notarize apikey=$apikey updater=$updater on_main=$on_main"
+          if [ "$sign" != "true" ]; then
+            echo "::notice::Building UNSIGNED. Either this is not a push to main, or APPLE_CERTIFICATE_P12_BASE64 is not set. The bundle will build and the tests will run; the app will not pass Gatekeeper."
+          fi
+          if [ "$sign" = "true" ] && [ "$notarize" != "true" ]; then
+            echo "::notice::Signing with the Developer ID identity, and NOT notarising, because no notarisation credential is set. A downloaded build will still be held by Gatekeeper until one is. Add APP_STORE_CONNECT_KEY_ID and APP_STORE_CONNECT_ISSUER_ID and APP_STORE_CONNECT_KEY_P8_BASE64, or APPLE_ID and APPLE_APP_SPECIFIC_PASSWORD and APPLE_TEAM_ID."
+          fi
+          if [ "$updater" != "true" ]; then
+            echo "::notice::No updater artifacts. TAURI_SIGNING_PRIVATE_KEY is not set, and an update bundle without a signature is refused by the updater anyway."
+          fi
+
+      # A throwaway keychain that lives as long as the job. The password is
+      # generated here rather than kept as a secret, because a secret whose only
+      # job is to unlock a keychain this job just created is a secret nobody
+      # needs to hold.
+      - name: Import the signing certificate
+        if: steps.gate.outputs.sign == 'true'
+        env:
+          APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 24)"
+          echo "::add-mask::$KEYCHAIN_PASSWORD"
+          echo "$APPLE_CERTIFICATE_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security set-keychain-settings -t 3600 -u build.keychain
+          security import "$RUNNER_TEMP/certificate.p12" -k build.keychain \
+            -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" build.keychain > /dev/null
+          rm -f "$RUNNER_TEMP/certificate.p12"
+          security find-identity -v -p codesigning build.keychain
+
+      # notarytool reads the App Store Connect key from a path rather than from
+      # the environment. It is written inside the job, never echoed, and removed
+      # at the end.
+      - name: Stage the App Store Connect key
+        if: steps.gate.outputs.apikey == 'true'
+        env:
+          ASC_KEY_P8: ${{ secrets.APP_STORE_CONNECT_KEY_P8_BASE64 }}
+        run: |
+          set -eu
+          umask 177
+          printf '%s' "$ASC_KEY_P8" | base64 --decode > "$RUNNER_TEMP/AuthKey.p8"
+          chmod 600 "$RUNNER_TEMP/AuthKey.p8"
+          if ! head -1 "$RUNNER_TEMP/AuthKey.p8" | grep -q "BEGIN PRIVATE KEY"; then
+            echo "::error::APP_STORE_CONNECT_KEY_P8_BASE64 did not decode to a PEM private key. Nothing was written."
+            rm -f "$RUNNER_TEMP/AuthKey.p8"
+            exit 1
+          fi
+          echo "APPLE_API_KEY_PATH=$RUNNER_TEMP/AuthKey.p8" >> "$GITHUB_ENV"
+          echo "the key decoded to a PEM private key of $(wc -c < "$RUNNER_TEMP/AuthKey.p8") bytes"
+
+      # THE ONE STEP THIS APP HAS THAT THE DESKTOP APP DOES NOT. The Tauri
+      # bundler signs frameworks and sidecar binaries inside out, per Apple's
+      # rule, and only those. A Python tree copied in as a resource is not in
+      # that list, so it would reach the notary unsigned and be refused. There
+      # are four Mach-O files in the pruned tree and they are signed here,
+      # before the app around them is.
+      - name: Sign the Mach-O files inside the bundled Python
+        if: steps.gate.outputs.sign == 'true'
+        env:
+          IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: scripts/sign-runtime.sh "$IDENTITY"
+
+      # The cargo cache keeps release/bundle between runs, so an older build
+      # rides along into the artifact and into the signing step.
+      - name: Clean stale bundle outputs
+        run: rm -rf src-tauri/target/${{ matrix.target }}/release/bundle
+
+      # The Tauri CLI reads the APPLE_* variables itself. An empty environment
+      # variable is still a set environment variable: passing APPLE_CERTIFICATE
+      # as "" makes the CLI try to import a certificate that is not there and
+      # fail with a message a long way from "no secret is configured". So they
+      # are exported here, in the shell, only when there is something to put in
+      # them. APPLE_CERTIFICATE is not passed at all, because the step above
+      # already put the identity in the default keychain.
+      - name: tauri build (${{ matrix.target }})
+        env:
+          SIGN: ${{ steps.gate.outputs.sign }}
+          NOTARIZE: ${{ steps.gate.outputs.notarize }}
+          UPDATER: ${{ steps.gate.outputs.updater }}
+          IN_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          IN_APPLE_ID: ${{ secrets.APPLE_ID }}
+          IN_APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          IN_APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          IN_APPLE_API_ISSUER: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          IN_APPLE_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          IN_TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          IN_TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          set -eu
+          if [ "$SIGN" = "true" ] && [ -n "$IN_SIGNING_IDENTITY" ]; then
+            export APPLE_SIGNING_IDENTITY="$IN_SIGNING_IDENTITY"
+          fi
+          if [ "$NOTARIZE" = "true" ]; then
+            if [ -n "$IN_APPLE_APP_SPECIFIC_PASSWORD" ]; then
+              export APPLE_ID="$IN_APPLE_ID"
+              export APPLE_PASSWORD="$IN_APPLE_APP_SPECIFIC_PASSWORD"
+            fi
+            if [ -n "$IN_APPLE_API_KEY_ID" ]; then
+              export APPLE_API_ISSUER="$IN_APPLE_API_ISSUER"
+              export APPLE_API_KEY="$IN_APPLE_API_KEY_ID"
+              # APPLE_API_KEY_PATH was put in the environment by the step that
+              # wrote the .p8 out.
+            fi
+            export APPLE_TEAM_ID="$IN_APPLE_TEAM_ID"
+          fi
+          if [ "$UPDATER" = "true" ]; then
+            export TAURI_SIGNING_PRIVATE_KEY="$IN_TAURI_SIGNING_PRIVATE_KEY"
+            export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="${IN_TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}"
+          fi
+
+          # createUpdaterArtifacts is off in the checked in config, because
+          # turning it on without a signing key fails the build. The overlay
+          # turns it on only when the key is there. The output is kept so the
+          # step below can fail on a warning the CLI only prints; piped through
+          # tee so the log still reads normally, and PIPESTATUS because tee
+          # swallows the exit code before it.
+          if [ "$UPDATER" = "true" ]; then
+            npm run tauri -- build --target ${{ matrix.target }} \
+              --bundles app,dmg --config src-tauri/tauri.updater.conf.json 2>&1 | tee "$RUNNER_TEMP/build.log"
+          else
+            npm run tauri -- build --target ${{ matrix.target }} --bundles app,dmg 2>&1 | tee "$RUNNER_TEMP/build.log"
+          fi
+          exit "${PIPESTATUS[0]}"
+
+      # A key that does not match the public key in the config is a WARNING from
+      # the CLI and nothing more, so the build goes green and every update it
+      # produces is refused by every installed app, silently, for as long as
+      # nobody tries one. That is the worst shape a failure can take, so it is a
+      # failure here.
+      - name: The updater key has to match the key in the config
+        if: steps.gate.outputs.updater == 'true'
+        run: |
+          if grep -q "does not match the public key" "$RUNNER_TEMP/build.log"; then
+            echo "::error::The TAURI_SIGNING_PRIVATE_KEY secret does not match plugins.updater.pubkey in src-tauri/tauri.conf.json. Every update signed with it would be refused by every installed app."
+            exit 1
+          fi
+          echo "the updater key matches the key in the config"
+
+      # THE BUNDLER NOTARIZES THE APP AND NOT THE DISK IMAGE. It signs the dmg
+      # and stops there, while the app inside it was notarized and stapled
+      # before the dmg was built. A dmg with no ticket of its own still opens,
+      # because Gatekeeper falls back to asking Apple over the network, but on a
+      # machine with no network at that moment, or behind a captive portal, it
+      # is held. So the disk image gets its own ticket here, which is the whole
+      # difference between a download that opens and one that has to be argued
+      # with.
+      - name: Notarize and staple the disk image
+        if: steps.gate.outputs.notarize == 'true'
+        env:
+          ASC_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          IN_APPLE_ID: ${{ secrets.APPLE_ID }}
+          IN_APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          IN_APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -eu
+          if [ "${{ steps.gate.outputs.apikey }}" = "true" ]; then
+            set -- --key "$APPLE_API_KEY_PATH" --key-id "$ASC_KEY_ID" --issuer "$ASC_ISSUER_ID"
+          else
+            set -- --apple-id "$IN_APPLE_ID" --password "$IN_APPLE_APP_SPECIFIC_PASSWORD" --team-id "$IN_APPLE_TEAM_ID"
+          fi
+          DMG=$(ls src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg | head -1)
+          echo "submitting $(basename "$DMG")"
+          set +e
+          xcrun notarytool submit "$DMG" "$@" \
+            --wait --timeout 30m \
+            --output-format json > "$RUNNER_TEMP/notary.json"
+          SUBMIT_CODE=$?
+          set -e
+          cat "$RUNNER_TEMP/notary.json"
+          STATUS=$(node -e "try{console.log(JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')).status||'')}catch(e){console.log('')}" "$RUNNER_TEMP/notary.json")
+          ID=$(node -e "try{console.log(JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')).id||'')}catch(e){console.log('')}" "$RUNNER_TEMP/notary.json")
+          if [ "$STATUS" != "Accepted" ]; then
+            echo "::error::Apple did not accept the disk image (status ${STATUS:-unknown}, exit $SUBMIT_CODE). The log follows."
+            if [ -n "$ID" ]; then
+              xcrun notarytool log "$ID" "$@" || true
+            fi
+            exit 1
+          fi
+          xcrun stapler staple "$DMG"
+          echo "stapled $(basename "$DMG")"
+
+      # Hard gate: on a signing run the artifact only uploads if macOS itself
+      # accepts the result. spctl is the check Gatekeeper actually performs on a
+      # customer's machine. The runtime is checked separately, because an
+      # unsigned file inside a signed bundle is exactly the failure this app is
+      # shaped around.
+      - name: Verify the signature and the notarisation ticket
+        if: steps.gate.outputs.sign == 'true'
+        run: |
+          set -eu
+          APP="src-tauri/target/${{ matrix.target }}/release/bundle/macos/Tiiny App Farm.app"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          codesign -dv --verbose=4 "$APP" 2>&1 | grep -E 'Authority|TeamIdentifier|flags'
+          # Each Mach-O file inside the bundled Python, verified on its own.
+          # A loop rather than find -exec, because find returns its own exit
+          # status and would swallow a failed codesign, which is the whole
+          # thing this step exists to catch.
+          RUNTIME="$APP/Contents/Resources/runtime"
+          seen=0
+          while IFS= read -r file; do
+            case "$(file -b "$file")" in
+              *Mach-O*)
+                codesign --verify --strict "$file"
+                echo "signed: ${file#"$RUNTIME"/}"
+                seen=$((seen + 1))
+                ;;
+            esac
+          done < <(find "$RUNTIME" -type f ! -type l)
+          # Against what the staging script counted, not against a number typed
+          # here: a number typed here goes stale the first time a runtime
+          # release changes what it ships, and the failure that causes is an
+          # unsigned file inside a signed bundle.
+          want=$(node -p "require('./src-tauri/runtime/runtime.json').machO")
+          if [ "$seen" -ne "$want" ]; then
+            echo "::error::The staged Python has $want Mach-O files and $seen verified inside the bundle. Either the runtime changed or scripts/sign-runtime.sh did not reach all of them."
+            exit 1
+          fi
+          if [ "${{ steps.gate.outputs.notarize }}" = "true" ]; then
+            spctl -a -vvv -t exec "$APP"
+            xcrun stapler validate "$APP"
+            DMG=$(ls src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg | head -1)
+            spctl -a -t open --context context:primary-signature -v "$DMG"
+            xcrun stapler validate "$DMG"
+            echo "the app and the disk image are both signed, notarized and stapled"
+          else
+            echo "Signed but not notarised, so Gatekeeper is not checked here."
+          fi
+
+      # Whether it was signed or not, the app has to contain a working engine.
+      # This is the phase 0 question, asked on every run.
+      - name: The bundled engine answers from inside the bundle
+        run: |
+          set -eu
+          APP="src-tauri/target/${{ matrix.target }}/release/bundle/macos/Tiiny App Farm.app"
+          du -sh "$APP"
+          ls -l src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+          if [ "${{ matrix.target }}" = "aarch64-apple-darwin" ] || [ "$(uname -m)" = "x86_64" ]; then
+            "$APP/Contents/Resources/runtime/bin/python3.11" -m farm.farm --version
+          else
+            echo "::notice::The ${{ matrix.target }} interpreter cannot be run on this runner, so only its presence is checked."
+            test -x "$APP/Contents/Resources/runtime/bin/python3.11"
+          fi
+
+      # The feed fragment for this architecture. The whole feed is assembled by
+      # the job below, because a feed naming one architecture is a feed that
+      # silently never updates the other one.
+      - name: Write the feed fragment
+        if: steps.gate.outputs.updater == 'true'
+        run: |
+          set -eu
+          OUT="$RUNNER_TEMP/feed"
+          mkdir -p "$OUT"
+          BUNDLE=src-tauri/target/${{ matrix.target }}/release/bundle/macos
+          TARBALL=$(ls "$BUNDLE"/*.app.tar.gz | head -1)
+          SIGFILE="$TARBALL.sig"
+          VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          NAME="tiinyapp-farm-launcher_${VERSION}_${{ matrix.arch }}.app.tar.gz"
+          cp "$TARBALL" "$OUT/$NAME"
+          cp "$SIGFILE" "$OUT/$NAME.sig"
+          node -e '
+            const fs = require("fs");
+            const [out, name, version, sigfile, key] = process.argv.slice(1);
+            // The whole contents of the .sig file, which is what the updater
+            // verifies against. A path or a URL in this field is refused.
+            const signature = fs.readFileSync(sigfile, "utf8").trim();
+            const url = `https://tiinyapp.farm/launcher/${version}/${name}`;
+            fs.writeFileSync(`${out}/${key}.json`, JSON.stringify({ version, key, signature, url }, null, 2) + "\n");
+          ' "$OUT" "$NAME" "$VERSION" "$SIGFILE" "${{ matrix.feed_key }}"
+          cat "$OUT/${{ matrix.feed_key }}.json"
+
+      - name: Upload the disk image
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiinyapp-farm-launcher-macos-${{ matrix.arch }}-dmg
+          path: src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+          if-no-files-found: error
+
+      - name: Upload the updater bundle and the fragment
+        if: steps.gate.outputs.updater == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiinyapp-farm-launcher-macos-${{ matrix.arch }}-updater
+          path: ${{ runner.temp }}/feed/*
+          if-no-files-found: error
+
+      # The runner is thrown away, so this is belt and braces. It costs one line
+      # and it means the key is not sitting in a temp directory for the rest of
+      # a job that may yet do something else.
+      - name: Remove the signing key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/AuthKey.p8"
+
+  feed:
+    name: latest.json
+    runs-on: ubuntu-latest
+    needs: bundle
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Collect the fragments
+        id: collect
+        uses: actions/download-artifact@v4
+        with:
+          pattern: tiinyapp-farm-launcher-macos-*-updater
+          path: fragments
+          merge-multiple: true
+        continue-on-error: true
+
+      # Without the updater secret there are no fragments, and saying so is
+      # better than a job that fails for a reason nobody has to fix yet.
+      - name: Merge them into one feed
+        run: |
+          set -eu
+          if [ ! -d fragments ] || [ -z "$(ls -A fragments 2>/dev/null || true)" ]; then
+            echo "::notice::No updater fragments were produced, so there is no feed to write. TAURI_SIGNING_PRIVATE_KEY is not set."
+            exit 0
+          fi
+          node -e '
+            const fs = require("fs");
+            const rows = fs.readdirSync("fragments").filter((n) => n.startsWith("darwin-") && n.endsWith(".json"));
+            if (!rows.length) throw new Error("no architecture fragments");
+            const platforms = {};
+            let version = null;
+            for (const row of rows) {
+              const piece = JSON.parse(fs.readFileSync(`fragments/${row}`, "utf8"));
+              if (version && version !== piece.version) throw new Error("the fragments name different versions");
+              version = piece.version;
+              platforms[piece.key] = { signature: piece.signature, url: piece.url };
+            }
+            // Both architectures or no feed. One of them missing is an update
+            // that silently never arrives on half the machines.
+            for (const key of ["darwin-aarch64", "darwin-x86_64"]) {
+              if (!platforms[key]) throw new Error(`${key} is missing from the feed`);
+              if (!platforms[key].signature || !platforms[key].url.startsWith("https://")) throw new Error(`bad row ${key}`);
+            }
+            const feed = { version, notes: `Tiiny App Farm ${version}`, pub_date: new Date().toISOString(), platforms };
+            fs.mkdirSync("feed", { recursive: true });
+            fs.writeFileSync("feed/latest.json", JSON.stringify(feed, null, 2) + "\n");
+            console.log(`latest.json names ${version} for ${Object.keys(platforms).join(", ")}`);
+          '
+          cat feed/latest.json
+
+      - name: Upload the feed
+        if: hashFiles('feed/latest.json') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiinyapp-farm-launcher-macos-feed
+          path: feed/latest.json
+          if-no-files-found: error
