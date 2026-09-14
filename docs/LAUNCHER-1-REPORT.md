@@ -82,11 +82,11 @@ own. The macOS workflow runs the same two checks before it will upload anything.
 
 | What | Measured | The page's figure |
 | --- | --- | --- |
-| Disk image, arm64 | 25,247,412 bytes | projected about 25 MB |
+| Disk image, arm64 | 25,247,826 bytes | projected about 25 MB |
 | App bundle on disk | 56.8 MB | 7.8 MB plus a runtime |
 | Runtime as published | 27,087,450 bytes (66.1 MB unpacked, 2,035 files) | 27.1 MB |
 | Runtime staged, pruned, with farm in it | 39.3 MB in 1,517 files | 44 MB, 1,650 files for 3.11.13 |
-| `farm --version` from inside the bundle | `farm 0.1.12` | the phase 0 question |
+| `farm --version` from inside the bundle | `farm 0.1.13` | the phase 0 question |
 
 The disk image figure moves by a few hundred bytes between builds of the same
 source, because it is compressed. The builds here came in between 32,459,073
@@ -135,7 +135,7 @@ it is running under.
 home. All ten checks passed, twice:
 
 ```
-yes  the engine answers from inside the bundle: farm 0.1.11
+yes  the engine answers from inside the bundle: farm 0.1.13
 yes  the Tiiny's key is saved from standard input: Device settings saved.
 yes  the device file is private: mode 600
 yes  the address on file is the one asked for: http://172.17.7.177/v1
@@ -211,14 +211,16 @@ Both are written and both are one branch away from the state that was seen, but
 neither has been on screen, and a picture of one would have to be staged rather
 than met.
 
-That command is in farm 0.1.12, which published while this was being built. The
-engine is pinned to `0.1.12` from PyPI and `farmFrom` is gone; everything above
-was measured against that pin. While it was unpublished the pin was the public
-commit the finder was written on, as a git URL rather than a path so that a
-runner that has never seen this Mac built the same thing, and CI proved that
-worked before the repin. **farm 0.1.13 published later the same hour**, which the
-launcher's own doctor pointed out on screen; nothing here has run against it, and
-moving to it is one line in `scripts/runtime.pins.json`. Deleting `farmFrom` and setting
+That command arrived in farm 0.1.12, and the engine is pinned to **0.1.13**,
+which is 0.1.12 plus a macOS fork fix: one opener that never consults the system
+proxy, so an app the launcher starts cannot die of an earlier hostname lookup.
+That matters more inside a bundle than anywhere else, which is why the pin
+skipped 0.1.12 entirely. `farmFrom` is gone and the engine comes from PyPI.
+
+While the finder was unpublished the pin was the public commit it was written
+on, as a git URL rather than a path, so a runner that had never seen this Mac
+built the same thing. CI proved that before the repin, which is worth keeping in
+mind the next time the launcher needs something the engine has not shipped yet. Deleting `farmFrom` and setting
 `farm` to `0.1.12` is the whole of the repin, and the Settings pane says
 `built from <path>` for as long as it is a worktree, so nothing can quietly
 claim a published version it is not.
