@@ -76,7 +76,7 @@ impl Watch {
                             // The held snapshot is what the window and the
                             // buttons read, so the change lands in it before
                             // anything is told to look again. Without this the
-                            // window asks a snapshot that never moved and a
+                            // window reads a snapshot that never moved and a
                             // model coming or going is invisible until the
                             // whole device is read afresh.
                             models::fold(&reporter.state::<Launcher>().snapshot, &change);

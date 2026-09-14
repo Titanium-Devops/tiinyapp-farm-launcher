@@ -80,6 +80,11 @@ interval. The window column is when a screenshot was taken and found the window
 already correct, so it is an upper bound on the window's delay and not a
 measurement of the repaint.
 
+The watch was then killed outright while the launcher was running. A new one was
+in its place six seconds later with a different process id, which is the two
+second pause plus the time the loop takes to notice. There was one watch before
+and one after, never two.
+
 ---
 
 ## 4. Two bugs this proof found, both fixed here
@@ -205,9 +210,9 @@ a window that quietly says the wrong thing.
   existing `CREATE_NO_WINDOW` path, but that is an argument and not a
   measurement.
 - An Intel Mac.
-- A Tiiny with no models loaded at all, or one that goes away mid-watch. The
-  restart-after-two-seconds path in `Watch::start` has not been exercised by
-  pulling the cable.
+- A Tiiny with no models loaded at all, or a Tiiny that goes away mid-watch. The
+  restart path was exercised by killing the watch child, not by taking the
+  device away, so what the window says while the device is gone is untested.
 - What happens when a model is loading rather than loaded. The engine reports a
   `changed` event with a state, and `apply` keeps it, but no model was caught
   mid-load during this work.
