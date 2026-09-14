@@ -15,7 +15,7 @@ pub mod tray;
 pub mod trouble;
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
@@ -39,6 +39,11 @@ pub struct Launcher {
     /// What the Tiiny had loaded when it was last asked, kept up to date by the
     /// watch. One snapshot, so the window and the buttons never disagree.
     pub snapshot: Mutex<Option<models::Snapshot>>,
+    /// Bumped every time the watch folds a change in. A full read of the device
+    /// takes a moment, and a change that arrives while it is in flight is
+    /// newer than the answer coming back; this is how the older answer knows
+    /// not to overwrite it.
+    pub snapshot_moved: AtomicU64,
 }
 
 /// One watch on the Tiiny's models, kept alive while the window is open.
@@ -51,6 +56,11 @@ pub struct Launcher {
 #[derive(Default)]
 pub struct Watch {
     running: Arc<AtomicBool>,
+    /// Which supervisor is the live one. A stop followed quickly by a start
+    /// leaves the old supervisor still inside its wait, and a flag it shares
+    /// with the new one would tell it to carry on. This number tells it that
+    /// its turn is over even though watching has begun again.
+    generation: Arc<AtomicU64>,
     child: Arc<Mutex<Option<std::process::Child>>>,
 }
 
@@ -61,10 +71,15 @@ impl Watch {
             return;
         }
         let running = self.running.clone();
+        let generation = self.generation.clone();
+        let mine = generation.fetch_add(1, Ordering::SeqCst) + 1;
         let held = self.child.clone();
         let handle = app.clone();
+        let mine_still = move |generation: &AtomicU64, running: &AtomicBool| {
+            running.load(Ordering::SeqCst) && generation.load(Ordering::SeqCst) == mine
+        };
         std::thread::spawn(move || {
-            while running.load(Ordering::SeqCst) {
+            while mine_still(&generation, &running) {
                 let engine = handle.state::<Launcher>().engine.clone();
                 let reporter = handle.clone();
                 let spawned = engine.spawn_streaming(
@@ -79,7 +94,9 @@ impl Watch {
                             // window reads a snapshot that never moved and a
                             // model coming or going is invisible until the
                             // whole device is read afresh.
-                            models::fold(&reporter.state::<Launcher>().snapshot, &change);
+                            let launcher = reporter.state::<Launcher>();
+                            models::fold(&launcher.snapshot, &change);
+                            launcher.snapshot_moved.fetch_add(1, Ordering::SeqCst);
                             let _ = reporter.emit("models:change", *change);
                             // The menu bar says which running app lost its
                             // model, and it only knows because it asks the
@@ -93,14 +110,24 @@ impl Watch {
                     },
                 );
                 match spawned {
-                    Ok(child) => {
-                        if let Ok(mut slot) = held.lock() {
-                            *slot = Some(child);
+                    Ok(mut child) => {
+                        // Somebody may have stopped the watch while the child
+                        // was starting. Handing it over then would leave it
+                        // running with nobody to kill it.
+                        if mine_still(&generation, &running) {
+                            if let Ok(mut slot) = held.lock() {
+                                *slot = Some(child);
+                            }
+                        } else {
+                            let _ = child.kill();
+                            let _ = child.wait();
+                            engine.pin_interpreter();
+                            break;
                         }
                         // Wait for it to end, however it ends.
                         loop {
                             std::thread::sleep(std::time::Duration::from_millis(300));
-                            if !running.load(Ordering::SeqCst) {
+                            if !mine_still(&generation, &running) {
                                 break;
                             }
                             let done = held
@@ -112,12 +139,18 @@ impl Watch {
                                 Some(Ok(None)) => {}
                             }
                         }
+                        // The engine moves the saved interpreter when it meets
+                        // a Python the local network refuses, so every command
+                        // this app runs pins it back afterwards. A watch is a
+                        // command like any other; its owner has to do it,
+                        // because nothing else knows the child has ended.
+                        engine.pin_interpreter();
                     }
                     Err(error) => {
                         let _ = handle.emit("models:trouble", error.message);
                     }
                 }
-                if !running.load(Ordering::SeqCst) {
+                if !mine_still(&generation, &running) {
                     break;
                 }
                 // A watch that died is restarted, after a pause, so a device
@@ -136,6 +169,9 @@ impl Watch {
     /// Stop watching. The child is killed rather than left to notice.
     pub fn stop(&self) {
         self.running.store(false, Ordering::SeqCst);
+        // Whichever supervisor is running, its turn is over, even if watching
+        // starts again before it has noticed.
+        self.generation.fetch_add(1, Ordering::SeqCst);
         if let Ok(mut slot) = self.child.lock() {
             if let Some(mut child) = slot.take() {
                 let _ = child.kill();
@@ -231,16 +267,28 @@ async fn farm_doctor(app: tauri::AppHandle) -> Answer<Value> {
 /// met is how a window ends up disagreeing with the engine it is a face on.
 #[tauri::command]
 async fn farm_models(app: tauri::AppHandle, apps: Option<Vec<AppNeeds>>) -> Answer<Value> {
+    let before = app
+        .state::<Launcher>()
+        .snapshot_moved
+        .load(Ordering::SeqCst);
     let answer = on_engine(app.clone(), |engine| {
         engine.json(&["models"], Budget::PATIENT)
     })
     .await?;
-    let snapshot = models::Snapshot::read(&answer);
-    if let Ok(mut held) = app.state::<Launcher>().snapshot.lock() {
-        *held = snapshot.clone();
+    let mut snapshot = models::Snapshot::read(&answer);
+    let launcher = app.state::<Launcher>();
+    if let Ok(mut held) = launcher.snapshot.lock() {
+        if launcher.snapshot_moved.load(Ordering::SeqCst) == before {
+            *held = snapshot.clone();
+        } else {
+            // The watch folded something in while this read was in flight, so
+            // what is held is newer than what came back. Answer with the newer
+            // one rather than winding the window backwards.
+            snapshot = held.clone();
+        }
     }
     Ok(json!({
-        "models": answer,
+        "models": snapshot.clone().map(|held| json!(held)).unwrap_or(answer),
         "needs": decide(apps.unwrap_or_default(), snapshot.as_ref()),
     }))
 }
@@ -901,6 +949,7 @@ pub fn run() {
                 pending_deep_link: Mutex::new(None),
                 watch: Watch::default(),
                 snapshot: Mutex::new(None),
+                snapshot_moved: AtomicU64::new(0),
             });
             apply_autostart(&handle, held.autostart);
 

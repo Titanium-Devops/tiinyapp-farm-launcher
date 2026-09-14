@@ -91,7 +91,15 @@ impl Snapshot {
     /// treated as fitting, since refusing to offer it would be worse than
     /// trying. This is `pick_model` in the engine, and it has to agree.
     pub fn would_load(&self, need: &str) -> Option<&Model> {
-        let free = self.npu.available;
+        self.would_load_within(need, self.npu.available)
+    }
+
+    /// The same pick against a budget that is not the whole of what is free.
+    ///
+    /// An app can be missing two kinds at once, and two models that each fit on
+    /// their own do not both fit. Offering Load and start for a pair that
+    /// cannot both be resident would be offering something that fails.
+    pub fn would_load_within(&self, need: &str, free: Option<i64>) -> Option<&Model> {
         self.downloaded
             .iter()
             .filter(|row| row.meets(need))
@@ -164,10 +172,16 @@ pub fn needs_of(needs: &[String], snapshot: Option<&Snapshot>) -> Needs {
     if unmet.is_empty() {
         return Needs::Met;
     }
+    // The picks are made against a budget that shrinks as each one is taken,
+    // because the app needs all of them at once and the Tiiny has one budget.
+    let mut free = snapshot.npu.available;
     let missing: Vec<Missing> = unmet
         .iter()
         .map(|kind| {
-            let pick = snapshot.would_load(kind);
+            let pick = snapshot.would_load_within(kind, free);
+            if let (Some(left), Some(cost)) = (free, pick.and_then(|row| row.units)) {
+                free = Some(left - cost);
+            }
             Missing {
                 kind: (*kind).to_string(),
                 would_load: pick.map(|row| row.id.clone()),
@@ -212,18 +226,34 @@ impl Needs {
                     .map(|row| row.kind.as_str())
                     .collect();
                 if !stuck.is_empty() {
-                    let listed = join_words(&stuck);
+                    // Two different reasons for being stuck, and unloading
+                    // something cannot conjure up a model that was never
+                    // downloaded, so each kind gets the sentence that is true
+                    // of it.
                     let nothing: Vec<&str> = missing
                         .iter()
                         .filter(|row| row.would_load.is_none() && row.on_disk == 0)
                         .map(|row| row.kind.as_str())
                         .collect();
-                    said.push(' ');
-                    said.push_str(&if nothing.len() == stuck.len() {
-                        format!("There is no {listed} model on it to load; download one in TiinyOS first.")
-                    } else {
-                        format!("Nothing it has for {listed} fits in the NPU units that are free; unload something first.")
-                    });
+                    let oversized: Vec<&str> = missing
+                        .iter()
+                        .filter(|row| row.would_load.is_none() && row.on_disk > 0)
+                        .map(|row| row.kind.as_str())
+                        .collect();
+                    if !nothing.is_empty() {
+                        let listed = join_words(&nothing);
+                        said.push(' ');
+                        said.push_str(&format!(
+                            "There is no {listed} model on it to load; download one in TiinyOS first."
+                        ));
+                    }
+                    if !oversized.is_empty() {
+                        let listed = join_words(&oversized);
+                        said.push(' ');
+                        said.push_str(&format!(
+                            "Nothing it has for {listed} fits in the NPU units that are free; unload something first."
+                        ));
+                    }
                 }
                 said
             }
@@ -338,17 +368,30 @@ pub fn apply(snapshot: &mut Snapshot, change: &Change) {
             }
         }
         _ => {
-            let row = Model {
-                id: change.id.clone(),
-                kind: change.kind.clone(),
-                capability: None,
-                units: change.units,
-                state: change.state.clone(),
-            };
-            snapshot.downloaded.retain(|held| held.id != row.id);
-            match snapshot.loaded.iter_mut().find(|held| held.id == row.id) {
-                Some(held) => *held = row,
-                None => snapshot.loaded.push(row),
+            snapshot.downloaded.retain(|held| held.id != change.id);
+            match snapshot.loaded.iter_mut().find(|held| held.id == change.id) {
+                // A change says what changed. A field it leaves out is a field
+                // that did not, so writing None over the kind would make an
+                // app that needs that kind look unmet because a model changed
+                // state.
+                Some(held) => {
+                    if change.kind.is_some() {
+                        held.kind = change.kind.clone();
+                    }
+                    if change.units.is_some() {
+                        held.units = change.units;
+                    }
+                    if change.state.is_some() {
+                        held.state = change.state.clone();
+                    }
+                }
+                None => snapshot.loaded.push(Model {
+                    id: change.id.clone(),
+                    kind: change.kind.clone(),
+                    capability: None,
+                    units: change.units,
+                    state: change.state.clone(),
+                }),
             }
         }
     }
@@ -644,5 +687,80 @@ mod tests {
         };
         fold(&held, &change);
         assert!(held.lock().unwrap().is_none());
+    }
+
+    #[test]
+    fn two_missing_kinds_are_picked_against_one_budget() {
+        // 32 units free, and two 28 unit models. Each fits on its own; both
+        // together do not, so the second one is not offered.
+        let mut state = tiiny();
+        state.npu.available = Some(32);
+        state
+            .loaded
+            .retain(|row| row.kind.as_deref() != Some("chat"));
+        state
+            .loaded
+            .retain(|row| row.kind.as_deref() != Some("tts"));
+        state.downloaded.push(Model {
+            id: "someone/tts-28".into(),
+            kind: Some("tts".into()),
+            capability: None,
+            units: Some(28),
+            state: None,
+        });
+        state.downloaded.push(Model {
+            id: "someone/chat-28".into(),
+            kind: Some("chat".into()),
+            capability: None,
+            units: Some(28),
+            state: None,
+        });
+        let needs = vec!["chat".to_string(), "tts".to_string()];
+        let Needs::Unmet { missing, loadable } = needs_of(&needs, Some(&state)) else {
+            panic!()
+        };
+        assert_eq!(missing.len(), 2);
+        assert_eq!(missing[0].would_load.as_deref(), Some("someone/chat-28"));
+        assert_eq!(missing[1].would_load, None);
+        assert!(!loadable);
+    }
+
+    #[test]
+    fn a_kind_with_nothing_downloaded_and_one_that_does_not_fit_get_their_own_sentence() {
+        let mut state = tiiny();
+        state.npu.available = Some(1);
+        state
+            .loaded
+            .retain(|row| row.kind.as_deref() != Some("chat"));
+        state
+            .loaded
+            .retain(|row| row.kind.as_deref() != Some("image"));
+        state
+            .downloaded
+            .retain(|row| row.kind.as_deref() != Some("image"));
+        let needs = vec!["chat".to_string(), "image".to_string()];
+        let said = needs_of(&needs, Some(&state)).sentence("Story Lantern");
+        assert!(
+            said.contains("There is no image model on it to load"),
+            "{said}"
+        );
+        assert!(
+            said.contains("Nothing it has for chat fits in the NPU units that are free"),
+            "{said}"
+        );
+    }
+
+    #[test]
+    fn a_change_that_only_says_the_state_keeps_the_kind() {
+        let mut state = tiiny();
+        let line = r#"{"command":"models","event":"changed","id":"Qwen/Qwen3-8B","state":"loading","npu":{"total":100,"used":68,"available":32}}"#;
+        let Some(Watched::Changed(change)) = read_watch_line(line) else {
+            panic!()
+        };
+        apply(&mut state, &change);
+        let row = state.meeting("chat").expect("the chat model is still chat");
+        assert_eq!(row.id, "Qwen/Qwen3-8B");
+        assert_eq!(row.units, Some(28));
+        assert_eq!(row.state.as_deref(), Some("loading"));
     }
 }

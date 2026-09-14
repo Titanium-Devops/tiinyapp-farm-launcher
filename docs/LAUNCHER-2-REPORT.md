@@ -6,7 +6,7 @@ Built 2026-09-14 on top of the merged LAUNCHER-1 work (`f0105af`), against farm
 **Every number below was measured on one machine: a MacBook Pro, Apple M5 Max,
 macOS 26.6.2 (25G83), arm64, against Jason's Tiiny at 172.17.7.177.** Nothing
 here was measured on Windows or on any other machine. What was not measured is
-in section 9 and is labelled as such.
+in section 10 and is labelled as such.
 
 ---
 
@@ -17,12 +17,12 @@ in section 9 and is labelled as such.
 | A Models pane: loaded models as cards with kind, units and state | `ui/index.html`, `renderModels` in `ui/app.js` | `docs/shots/16-models-loaded.png` |
 | Free units as a bar | Same pane, above the list | Same picture: 32 of 100 free |
 | Downloaded and not loaded, with a Load button each, guarded by free units | Same pane, `modelRow` in `ui/app.js` | `docs/shots/17-models-on-disk.png` |
-| A Needs line on every app card, each kind marked loaded or not | `renderCardModels` in `ui/app.js`, decided in `src-tauri/src/models.rs` | `18-card-needs-met.png`, `19-card-needs-unmet.png` |
-| A Better with line for prefers | Same function | `18-card-needs-met.png` |
-| Start disabled with the reason, and a Load and start button | `renderCardState` in `ui/app.js` | `20-running-needs-unmet.png` |
+| A Needs line on every app card, each kind marked loaded or not | `renderCardModels` in `ui/app.js`, decided in `src-tauri/src/models.rs` | `docs/shots/18-card-needs-met.png`, `docs/shots/19-card-needs-unmet.png` |
+| A Better with line for prefers | Same function | `docs/shots/18-card-needs-met.png` |
+| Start disabled with the reason, and a Load and start button | `renderCardState` in `ui/app.js` | `docs/shots/20-running-needs-unmet.png` |
 | One `farm models --watch --json` child while a window is open, restarted if it dies | `Watch` in `src-tauri/src/lib.rs`, `spawn_streaming` in `src-tauri/src/engine.rs` | Section 3 |
-| A badge on a running app whose needed model was unloaded | `lostSentence` in `ui/app.js` | `20-running-needs-unmet.png` |
-| The same in the tray menu | `src-tauri/src/tray.rs` | `22-tray-lost-model.png` |
+| A badge on a running app whose needed model was unloaded | `lostSentence` in `ui/app.js` | `docs/shots/20-running-needs-unmet.png` |
+| The same in the tray menu | `src-tauri/src/tray.rs` | `docs/shots/22-tray-lost-model.png` |
 | Never load a model without a click | Nothing in the launcher ever calls a load | Section 5 |
 
 The one decision the window makes, whether Start can be pressed, is made in Rust
@@ -47,11 +47,12 @@ and were identical. The four loaded models were `Qwen/Qwen3-8B` (chat, 28
 units), `Qwen/Qwen3-Embedding-0.6B` (embedding, 1), `Tongyi-MAI/Z-Image-Turbo`
 (image, 32) and `Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice` (tts, 7).
 
-Two models were stopped and started during the work, both times the same one,
-`Qwen/Qwen3-8B`, and both times through the farm's own gateway so that the key
-was handled the farm's way: read in process, sent in a header, never in a path,
-an argument or a log. The tool that did it is an operator tool in the scratch
-directory and is not part of the launcher.
+One model was stopped and started again, three times over the course of the
+work, always the same one: `Qwen/Qwen3-8B`, the chat model. Every stop and start
+went through the farm's own gateway so that the key was handled the farm's way,
+read in process and sent in a header, never in a path, an argument or a log. The
+tool that did it is an operator tool in the scratch directory and is not part of
+the launcher. Nothing else on the device was touched.
 
 ---
 
@@ -85,6 +86,12 @@ in its place six seconds later with a different process id, which is the two
 second pause plus the time the loop takes to notice. There was one watch before
 and one after, never two.
 
+The whole cycle was run once more against the build that carries the review
+fixes in section 5: the engine reported the unload 0.49 s after the stop was
+asked for and the load 0.96 s after the device said it was loaded, the window
+had cleared every refusal within 2.3 s of that line, and the Tiiny finished with
+the same four models, the same 68 of 100 units and the same 16 on disk.
+
 ---
 
 ## 4. Two bugs this proof found, both fixed here
@@ -104,11 +111,31 @@ runs in polling the Tiiny for ever; three of them were found alive at once
 during this work. The app now stops the watch on `RunEvent::Exit`. Verified:
 quitting from the menu bar leaves no child behind. A launcher that is killed
 outright still leaks one, and that needs the engine's help, which is in section
-6.
+7.
 
 ---
 
-## 5. Nothing loads a model without a click
+## 5. Seven things the review found, all fixed
+
+The automated review on the pull request raised seven findings. Every one was
+checked against the code and fixed rather than answered.
+
+| What it found | What was done |
+| --- | --- |
+| The report named screenshots without their directory | Each one is now a path from the repository root |
+| `spawn_streaming` pins the interpreter before the child and nothing pins it after, because the watch owns the child | The watch pins it again whenever its child ends, which is the rule every other engine call already follows |
+| A stop followed quickly by a start leaves the old supervisor running beside the new one, and both spawn a watch | Each supervisor carries a generation number; a stop moves the number, so the old one leaves even if watching has begun again. Verified by closing and reopening the window three times in a row: one watch child, never two |
+| A full device read that overtakes a watch change overwrites the newer answer with the older one | The full read notes where the snapshot was before it asked, and leaves what the watch folded in alone if it moved while the read was in flight |
+| Two missing kinds were each priced against the whole free budget, so a pair that cannot both be resident was offered | The picks are made against a budget that shrinks as each one is taken |
+| A kind with nothing downloaded and a kind whose models are too big got one sentence, telling somebody to unload something that would not help | Each kind gets the sentence that is true of it |
+| A `changed` event without a kind would write `None` over the kind and make an app look unmet | A change now merges the fields it carries and leaves out the ones it does not |
+
+Three of the seven have their own tests. The other four are wiring, and two of
+them were checked by hand against the running app.
+
+---
+
+## 6. Nothing loads a model without a click
 
 There is no code path in the launcher that loads a model on its own. The watch
 only reads. `farm_start` passes `--load` only when the window sends `load: true`,
@@ -118,7 +145,7 @@ there is not one.
 
 ---
 
-## 6. Three things the engine cannot do yet
+## 7. Three things the engine cannot do yet
 
 These are farm 0.1.14 findings, not launcher work, and each one is something the
 launcher has had to say out loud rather than hide.
@@ -145,7 +172,7 @@ watch checked for its reader being gone it would exit on its own.
 
 ---
 
-## 7. The gate, and what it can no longer do here
+## 8. The gate, and what it can no longer do here
 
 `scripts/verify-launcher.mjs` drives the built app's engine against the real
 Tiiny in a scratch home. Against farm 0.1.13 it passed all ten checks. Against
@@ -179,23 +206,23 @@ worse than a failure somebody has to read.
 Those three were proved by hand instead, through the running app, which is where
 the access exists: Story Lantern started and ran on port 8421 for 28 minutes,
 appeared in the Running pane and the menu bar the whole time, and stopped when
-Stop was pressed. `20-running-needs-unmet.png` and `23-needs-met-again.png` are
+Stop was pressed. `docs/shots/20-running-needs-unmet.png` and `docs/shots/23-needs-met-again.png` are
 that app running.
 
 ---
 
-## 8. Checks
+## 9. Checks
 
 | Check | Result |
 | --- | --- |
-| `cargo test` | 76 passed, 0 failed |
-| Of those, in `models.rs` | 18 |
+| `cargo test` | 79 passed, 0 failed |
+| Of those, in `models.rs` | 21 |
 | `cargo clippy --all-targets -- -D warnings` | clean |
 | `cargo fmt --check` | clean |
 | `npm run tauri build` | app and dmg built, ad hoc signed |
-| `scripts/verify-launcher.mjs` against the real Tiiny | 7 of 10, section 7 |
+| `scripts/verify-launcher.mjs` against the real Tiiny | 7 of 10, section 8 |
 
-The 18 tests in `src-tauri/src/models.rs` cover the watch line parser, the needs
+The 21 tests in `src-tauri/src/models.rs` cover the watch line parser, the needs
 state machine and the fold into the held snapshot. Their fixture is the real
 state of Jason's Tiiny, copied out of `farm models --json` rather than invented,
 so a change in what the engine answers shows up as a failing test rather than as
@@ -203,7 +230,7 @@ a window that quietly says the wrong thing.
 
 ---
 
-## 9. Not measured
+## 10. Not measured
 
 - Windows. Nothing in this pull request was run on Windows. The watch child is
   spawned the same way as every other engine call, which is covered by the
