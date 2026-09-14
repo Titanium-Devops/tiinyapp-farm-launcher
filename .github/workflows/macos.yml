@@ -345,9 +345,28 @@ jobs:
           APP="src-tauri/target/${{ matrix.target }}/release/bundle/macos/Tiiny App Farm.app"
           codesign --verify --deep --strict --verbose=2 "$APP"
           codesign -dv --verbose=4 "$APP" 2>&1 | grep -E 'Authority|TeamIdentifier|flags'
+          # Each Mach-O file inside the bundled Python, verified on its own.
+          # A loop rather than find -exec, because find returns its own exit
+          # status and would swallow a failed codesign, which is the whole
+          # thing this step exists to catch.
           RUNTIME="$APP/Contents/Resources/runtime"
-          find "$RUNTIME" -type f ! -type l -exec sh -c 'file -b "$1" | grep -q Mach-O && codesign --verify --strict "$1" && echo "signed: ${1#'"$RUNTIME"'/}"' _ {} \;
-          "$RUNTIME/bin/python3.11" -m farm.farm --version
+          seen=0
+          while IFS= read -r file; do
+            case "$(file -b "$file")" in
+              *Mach-O*)
+                codesign --verify --strict "$file"
+                echo "signed: ${file#"$RUNTIME"/}"
+                seen=$((seen + 1))
+                ;;
+            esac
+          done < <(find "$RUNTIME" -type f ! -type l)
+          # The pruned tree has four: the interpreter, libpython, and two
+          # extension modules. A different number means the prune list and the
+          # runtime have drifted apart and the signing step may have missed one.
+          if [ "$seen" -ne 4 ]; then
+            echo "::error::Expected 4 Mach-O files inside the bundled Python and verified $seen. Either the runtime changed or scripts/sign-runtime.sh did not reach all of them."
+            exit 1
+          fi
           if [ "${{ steps.gate.outputs.notarize }}" = "true" ]; then
             spctl -a -vvv -t exec "$APP"
             xcrun stapler validate "$APP"
