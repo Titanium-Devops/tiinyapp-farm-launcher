@@ -252,8 +252,11 @@ async function main() {
   // source that declares something else fails here rather than in somebody's
   // hands.
   const from = pins.farmFrom || null;
-  if (from && !fs.existsSync(path.join(from, "pyproject.toml"))) {
-    throw new Error(`farmFrom points at ${from}, which is not a Python project.`);
+  // A pip requirement, so either a git URL or a directory. A directory is for
+  // working on the engine and the launcher at once; only a URL belongs on a
+  // branch, because a runner has never seen anybody's worktree.
+  if (from && !from.startsWith("git+") && !fs.existsSync(path.join(from, "pyproject.toml"))) {
+    throw new Error(`farmFrom points at ${from}, which is neither a git URL nor a Python project.`);
   }
   log(from
     ? `farm     installing tiinyapp-farm from ${from} (expecting ${pins.farm})`

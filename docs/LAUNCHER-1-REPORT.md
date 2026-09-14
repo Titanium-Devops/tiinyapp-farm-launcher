@@ -80,15 +80,15 @@ own. The macOS workflow runs the same two checks before it will upload anything.
 
 | What | Measured | The page's figure |
 | --- | --- | --- |
-| Disk image, arm64 | 32,464,071 bytes | projected about 25 MB |
+| Disk image, arm64 | 32,764,713 bytes | projected about 25 MB |
 | App bundle on disk | 73.5 MB | 7.8 MB plus a runtime |
 | Runtime as published | 27,087,450 bytes (66.1 MB unpacked, 2,035 files) | 27.1 MB |
 | Runtime staged, pruned, with farm in it | 56.2 MB in 1,518 files | 44 MB, 1,650 files for 3.11.13 |
 | `farm --version` from inside the bundle | `farm 0.1.11` | the phase 0 question |
 
 The disk image figure moves by a few hundred bytes between builds of the same
-source, because it is compressed. Four builds here came in between 32,459,073
-and 32,464,071 bytes.
+source, because it is compressed. The builds here came in between 32,459,073
+and 32,764,713 bytes, the last of which carries the finder.
 
 Two reasons the staged tree is bigger than the page's 3.11.13 figure. 3.11.16
 ships tcl9 and tk9 rather than tcl8, and both `bin/python3.11` and
@@ -192,8 +192,10 @@ file, mode 0600, without the key ever being displayed.
 
 That command is in farm 0.1.12, which had not published when this was written.
 Until it does, `scripts/runtime.pins.json` carries `farmFrom` and the engine is
-installed from the worktree the finder was written in (Titanium-Devops
-tiinyapp-farm PR 30, branch `device-find`). Deleting `farmFrom` and setting
+installed from the commit the finder was written on,
+`Titanium-Devops/tiinyapp-farm@7e4cce6` (PR 30, branch `device-find`), as a git
+URL rather than a path, so a runner that has never seen this Mac builds the same
+thing. Deleting `farmFrom` and setting
 `farm` to `0.1.12` is the whole of the repin, and the Settings pane says
 `built from <path>` for as long as it is a worktree, so nothing can quietly
 claim a published version it is not.
