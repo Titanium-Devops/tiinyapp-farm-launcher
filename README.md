@@ -13,7 +13,9 @@ exactly where the CLI expects them.
 
 The design this implements is `docs/LAUNCHER.md` in the
 [tiinyapp-farm](https://github.com/Titanium-Devops/tiinyapp-farm) repository.
-What this branch built, and what it measured, is `docs/LAUNCHER-1-REPORT.md`.
+What was built, and what was measured, is `docs/LAUNCHER-1-REPORT.md` for the
+first round and `docs/LAUNCHER-2-REPORT.md` for the models pane and per-app
+needs.
 
 ## What is inside
 

@@ -138,6 +138,7 @@ main { padding: 24px 20px 40px; max-width: 1180px; margin: 0 auto }
 .approw .n { font: 700 17px var(--display) }
 .approw .m { color: var(--mute); font-size: 13px; margin-top: 3px; display: flex; gap: 10px; flex-wrap: wrap }
 .approw .act { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end }
+.approw .m .over { color: var(--bad) }
 
 /* Progress ------------------------------------------------------------ */
 .bar { height: 8px; border-radius: 999px; background: #0b1017; border: 1px solid var(--fence); overflow: hidden }

@@ -21,6 +21,10 @@ pub struct Row {
     pub url: Option<String>,
     pub update_available: Option<String>,
     pub health: Option<String>,
+    /// The kinds of model this running app needs and has not got, which the
+    /// engine works out. A running app whose model went away underneath it is
+    /// the one thing the menu bar has to say without being opened.
+    pub unmet: Vec<String>,
 }
 
 /// Turn the engine's status answer into tray rows. Anything the answer does
@@ -43,6 +47,18 @@ pub fn rows_from(status: &Value) -> Vec<Row> {
                             .get("health")
                             .and_then(Value::as_str)
                             .map(str::to_string),
+                        unmet: row
+                            .get("models")
+                            .and_then(|models| models.get("unmet"))
+                            .and_then(Value::as_array)
+                            .map(|kinds| {
+                                kinds
+                                    .iter()
+                                    .filter_map(Value::as_str)
+                                    .map(str::to_string)
+                                    .collect()
+                            })
+                            .unwrap_or_default(),
                     })
                 })
                 .collect()
@@ -63,6 +79,9 @@ pub fn label_for(row: &Row) -> String {
     }
     if row.update_available.is_some() {
         label.push_str("  update ready");
+    }
+    if !row.unmet.is_empty() {
+        label.push_str(&format!("  no {} model loaded", row.unmet.join(" or ")));
     }
     label
 }
@@ -205,13 +224,22 @@ mod tests {
                 {"id": "story-lantern", "pid": 4242, "ports": [8420], "port": 8420,
                  "url": "http://localhost:8420/", "uptime": 91, "version": "0.1.2",
                  "installed": "0.1.2", "restartToUpdate": false, "health": "ok",
-                 "updateAvailable": null},
+                 "updateAvailable": null,
+                 "models": {"needs": ["chat"], "unmet": [], "lost": {}, "prefers": []}},
                 {"id": "tiiny-bench", "pid": 4243, "ports": [8422], "port": 8422,
                  "url": "http://localhost:8422", "uptime": 12, "version": "0.1.0",
                  "installed": "0.1.0", "restartToUpdate": false, "health": "unavailable",
-                 "updateAvailable": "0.2.0"}
+                 "updateAvailable": "0.2.0",
+                 "models": {"needs": ["chat"], "unmet": ["chat"], "lost": {"chat": "Qwen/Qwen3-8B"}, "prefers": []}}
             ]
         })
+    }
+
+    #[test]
+    fn a_running_app_whose_model_went_away_says_so_in_the_menu_bar() {
+        let rows = rows_from(&status());
+        assert_eq!(rows[0].unmet, Vec::<String>::new());
+        assert_eq!(rows[1].unmet, vec!["chat".to_string()]);
     }
 
     #[test]
@@ -235,7 +263,7 @@ mod tests {
         assert_eq!(label_for(&rows[0]), "story-lantern  port 8420");
         assert_eq!(
             label_for(&rows[1]),
-            "tiiny-bench  port 8422  not answering  update ready"
+            "tiiny-bench  port 8422  not answering  update ready  no chat model loaded"
         );
     }
 
@@ -246,6 +274,7 @@ mod tests {
             url: None,
             update_available: None,
             health: None,
+            unmet: Vec::new(),
         };
         assert_eq!(label_for(&row), "onelane");
     }
