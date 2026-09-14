@@ -234,7 +234,20 @@ they are what the screenshots were measured at.
 failure classifier, the settings file and the deep link parser have no window
 behind them, so this is a real test run rather than a compile check.
 
-Two defects the tests found, both fixed in the code rather than in the test:
+Three defects were found by something other than me reading the code.
+
+The Windows leg of CI found one this Mac never could. The prune patterns were
+resolved with `fs.existsSync` for any segment without a wildcard in it, and
+Windows has a case insensitive filesystem: `lib` found `Lib`, and `thread*`
+inside it matched `Lib/threading.py` and deleted the standard library's
+threading module. pip failed on the next line with `No module named
+'threading'`, which is a long way from saying a prune pattern was too greedy.
+Every segment is now matched against the names a directory actually has, case
+sensitively, on both platforms, and the staged tree is asked to import the
+twenty standard library modules `farm.py` uses before the staging is accepted.
+Staging on macOS is byte for byte what it was.
+
+Two the tests found, both fixed in the code rather than in the test:
 
 - A start that failed left the app in `Starting`, a state nothing else would ever
   move it out of, so the window would have shown a spinner forever.

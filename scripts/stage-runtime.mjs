@@ -65,7 +65,8 @@ const PRUNE_GLOBS = [
   "lib/tcl*",
   "lib/tk*",
   "lib/itcl*",
-  "lib/thread*",
+  "lib/thread3.*",
+  "lib/libtcl9thread*",
   "lib/libtcl*",
   "lib/libtk*",
   "lib/python3.11/idlelib",
@@ -90,20 +91,30 @@ function rm(target_) {
   fs.rmSync(target_, { recursive: true, force: true });
 }
 
+// Every segment of a prune pattern is matched against the names a directory
+// actually has, case sensitively, on both platforms.
+//
+// This used to lean on fs.existsSync for a segment with no wildcard in it, and
+// that is wrong on Windows, where the filesystem is case insensitive: "lib"
+// found "Lib", and then "thread*" inside it matched Lib/threading.py and
+// deleted the standard library's threading module. pip failed on the next line
+// with "No module named 'threading'", which is a long way from saying a prune
+// pattern was too greedy. GitHub Actions found it; this Mac never could.
 function expand(base, pattern) {
-  const parts = pattern.split("/");
   let found = [base];
-  for (const part of parts) {
+  for (const part of pattern.split("/")) {
     const next = [];
+    const rx = new RegExp(
+      "^" + part.split("*").map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(".*") + "$",
+    );
     for (const dir of found) {
-      if (!part.includes("*")) {
-        const candidate = path.join(dir, part);
-        if (fs.existsSync(candidate)) next.push(candidate);
-        continue;
+      let entries;
+      try {
+        entries = fs.readdirSync(dir);
+      } catch {
+        continue; // not a directory, or not there
       }
-      if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) continue;
-      const rx = new RegExp("^" + part.split("*").map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(".*") + "$");
-      for (const name of fs.readdirSync(dir)) if (rx.test(name)) next.push(path.join(dir, name));
+      for (const name of entries) if (rx.test(name)) next.push(path.join(dir, name));
     }
     found = next;
   }
@@ -262,6 +273,18 @@ async function main() {
   }
 
   const after = measure(tree);
+
+  // Everything farm.py imports from the standard library, asked for by name.
+  // A prune pattern that reaches one module too far is otherwise found at the
+  // worst moment, on somebody's machine, by an app that will not start.
+  const NEEDED = [
+    "argparse", "getpass", "hashlib", "http.client", "json", "os", "pathlib",
+    "re", "shlex", "shutil", "socket", "sqlite3", "ssl", "subprocess",
+    "tarfile", "tempfile", "threading", "time", "urllib.request", "zipfile",
+  ];
+  execFileSync(python, ["-c", `import ${NEEDED.join(", ")}`], { stdio: "inherit" });
+  log(`stdlib   ${NEEDED.length} modules farm needs all import`);
+
   const version = execFileSync(python, ["-m", "farm.farm", "--version"], { encoding: "utf8" }).trim();
   if (version !== `farm ${pins.farm}`) {
     throw new Error(`The staged runtime answers "${version}" and the pin says farm ${pins.farm}.`);
