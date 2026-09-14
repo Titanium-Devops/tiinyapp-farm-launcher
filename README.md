@@ -1,5 +1,78 @@
 # Tiiny App Farm launcher
 
-A small desktop app for macOS and Windows that installs and runs Tiiny farm apps for a person who will never open a terminal. It carries its own CPython and the `tiinyapp-farm` CLI inside itself, so there is nothing to install first.
+A small desktop app for macOS and Windows that installs and runs
+[Tiiny App Farm](https://tiinyapp.farm) apps for somebody who will never open a
+terminal. It carries its own CPython and the `tiinyapp-farm` command line tool
+inside itself, so there is nothing to install first: no Python, no Node, no
+package manager.
 
-Build notes live in `docs/LAUNCHER-1.md`. The design this implements is `docs/LAUNCHER.md` in the `tiinyapp-farm` repository.
+It is a face on the command line tool that already exists, not a second way of
+doing things. Same install directory, same device file, same lock, same logs.
+Somebody who starts with the launcher and later learns the CLI finds their apps
+exactly where the CLI expects them.
+
+The design this implements is `docs/LAUNCHER.md` in the
+[tiinyapp-farm](https://github.com/Titanium-Devops/tiinyapp-farm) repository.
+What this branch built, and what it measured, is `docs/LAUNCHER-1-REPORT.md`.
+
+## What is inside
+
+| Piece | Where |
+| --- | --- |
+| The shell: window, tray, deep link, updater | `src-tauri/src/` |
+| The window | `ui/` (plain files, no build step) |
+| The engine: CPython and `tiinyapp-farm`, pinned | `scripts/runtime.pins.json` |
+| Staging the engine into the bundle | `scripts/stage-runtime.mjs` |
+| Signing the engine's Mach-O files | `scripts/sign-runtime.sh` |
+| The release pipeline | `.github/workflows/` |
+
+## Building it
+
+```sh
+npm ci
+node scripts/stage-runtime.mjs          # fetch, verify, prune, install the engine
+npm run tauri -- build --bundles app,dmg
+```
+
+`stage-runtime.mjs` writes `src-tauri/runtime/`, which is not committed. It
+refuses a runtime whose bytes do not match the checksum in
+`scripts/runtime.pins.json`, and it fails rather than staging anything if the
+engine it installed does not answer with the pinned version.
+
+On macOS the Mach-O files inside that tree have to be signed before the app
+around them is, because the Tauri bundler signs frameworks and sidecars inside
+out and a resource tree is neither:
+
+```sh
+scripts/sign-runtime.sh                       # ad hoc, for a local build
+scripts/sign-runtime.sh "Developer ID Application: ..."
+```
+
+## Checking it against a real Tiiny
+
+```sh
+node scripts/verify-launcher.mjs \
+  --app "$HOME/Applications/Tiiny App Farm.app" \
+  --home /tmp/farm-gate \
+  --base http://your-tiiny/v1 \
+  --key-file "$HOME/.tiiny_1_api_key" \
+  --app-id story-lantern
+```
+
+`--home` is required and is not optional by accident: a gate that runs against
+somebody's real `~/tiinyapps` can install, start and remove their apps. The key
+file is read by that process and written to the child's standard input. It is
+never an argument, never an environment variable and never printed.
+
+The same variable works on the app itself. `FARM_LAUNCHER_HOME=/tmp/farm-gate`
+points the launcher's engine at a scratch home for a test run.
+
+## Tests
+
+```sh
+cd src-tauri && cargo test && cargo clippy --all-targets -- -D warnings && cargo fmt --check
+```
+
+The JSON reader, the progress reader, the state machine, the failure classifier
+and the deep link parser are plain Rust with no window behind them, so this is a
+real test run rather than a compile check.

@@ -110,17 +110,18 @@ pub fn expected_bytes(line: &str) -> Option<u64> {
 mod tests {
     use super::*;
 
-    // The exact sentences farm 0.1.11 prints during an install, in the order
-    // it prints them. Taken from Farm.install in farm/farm.py; if the engine
-    // ever changes its words these tests are what says so.
+    // The exact sentences farm 0.1.11 printed installing story-lantern on a
+    // MacBook Pro (Apple M5 Max) on 2026-09-14, copied out of the run rather
+    // than written from memory. If the engine ever changes its words, these
+    // tests are what says so.
     const INSTALL_LINES: &[&str] = &[
         "Looking up story-lantern in the catalog.",
         "Story Lantern 0.1.2",
         "Write, illustrate and narrate bedtime stories on your Tiiny.",
-        "By Jason Brashear.",
-        "Needs: Python 3.9 or newer, port 8420, a chat, image and tts model.",
-        "It asks for: files, network, device.",
-        "Downloading 3.5 MB from github.com.",
+        "Made by Jason Brashear. The farm has reviewed it.",
+        "Needs: Python 3.9 or newer, port 8420, your Tiiny, for chat, image, tts, 89 NPU units",
+        "It can reach your files, the network and your Tiiny.",
+        "Downloading 3.7 MB from github.com.",
         "The download matches the checksum the catalog lists.",
         "Unpacking it into /Users/somebody/tiinyapps/story-lantern/0.1.2.",
         "Ready. Run: farm start story-lantern",
@@ -148,7 +149,7 @@ mod tests {
     #[test]
     fn the_lines_that_are_not_steps_move_nothing() {
         assert!(read_line("Story Lantern 0.1.2").is_none());
-        assert!(read_line("It asks for: files, network, device.").is_none());
+        assert!(read_line("It can reach your files, the network and your Tiiny.").is_none());
         assert!(read_line("").is_none());
         assert!(read_line("   ").is_none());
         assert!(read_line("farm 0.1.12 is out and you are on 0.1.11.").is_none());

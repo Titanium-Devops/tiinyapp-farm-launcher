@@ -10,6 +10,7 @@ pub mod progress;
 pub mod settings;
 pub mod state;
 pub mod tray;
+pub mod trouble;
 
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -31,6 +32,11 @@ pub struct Launcher {
 }
 
 type Answer<T> = Result<T, EngineError>;
+
+/// The window the launcher opens with, and the smallest it will go. Both are
+/// in logical points, and both are what docs/shots was measured at.
+pub const WINDOW: (f64, f64) = (1100.0, 720.0);
+pub const SMALLEST: (f64, f64) = (720.0, 560.0);
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -472,10 +478,20 @@ pub fn run() {
 
             let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
                 .title("Tiiny App Farm")
-                .inner_size(1100.0, 720.0)
-                .min_inner_size(720.0, 560.0)
+                .inner_size(WINDOW.0, WINDOW.1)
+                .min_inner_size(SMALLEST.0, SMALLEST.1)
                 .resizable(true)
+                .center()
                 .build()?;
+            // Measured on a MacBook Pro (Apple M5 Max), macOS 26.6.2, on
+            // 2026-09-14: the builder's inner_size alone gave a window of
+            // 1197 by 881 points rather than 1100 by 720. Something between
+            // the window server and the builder decides a first frame for a
+            // window that has never been placed. Saying it again after the
+            // window exists is taken, and every screenshot in docs/shots was
+            // measured at the size this line asks for.
+            let _ = window.set_size(tauri::LogicalSize::new(WINDOW.0, WINDOW.1));
+            let _ = window.center();
             // Closing the window does not stop the apps, and it does not stop
             // the launcher either: the tray is still there, and the apps are
             // still running.

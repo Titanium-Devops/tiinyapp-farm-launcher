@@ -52,13 +52,23 @@ pub struct EngineError {
     /// The engine's commentary up to the point it stopped, newest last. This is
     /// what turns "it failed" into a sentence somebody can act on.
     pub commentary: Vec<String>,
+    /// What the window should offer next, read off the message. Computed here
+    /// so the page never has to guess at a failure it was handed.
+    pub trouble: crate::trouble::Trouble,
 }
 
 impl EngineError {
     pub fn plain(message: impl Into<String>) -> Self {
+        Self::new(message, Vec::new())
+    }
+
+    pub fn new(message: impl Into<String>, commentary: Vec<String>) -> Self {
+        let message = message.into();
+        let trouble = crate::trouble::classify(&message);
         Self {
-            message: message.into(),
-            commentary: Vec::new(),
+            message,
+            commentary,
+            trouble,
         }
     }
 }
@@ -179,16 +189,16 @@ impl Engine {
         let (stdout, commentary) = self.run(&with_json, budget, None, on_line)?;
         let trimmed = stdout.trim();
         if trimmed.is_empty() {
-            return Err(EngineError {
-                message:
-                    "The farm answered with nothing at all, which means it stopped before it could."
-                        .into(),
+            return Err(EngineError::new(
+                "The farm answered with nothing at all, which means it stopped before it could.",
                 commentary,
-            });
+            ));
         }
-        let value: Value = serde_json::from_str(trimmed).map_err(|_| EngineError {
-            message: "The farm answered with something that is not JSON.".into(),
-            commentary: commentary.clone(),
+        let value: Value = serde_json::from_str(trimmed).map_err(|_| {
+            EngineError::new(
+                "The farm answered with something that is not JSON.",
+                commentary.clone(),
+            )
         })?;
         if let Some(error) = value.get("error") {
             let message = error
@@ -196,10 +206,7 @@ impl Engine {
                 .and_then(Value::as_str)
                 .unwrap_or("The farm refused, and did not say why.")
                 .to_string();
-            return Err(EngineError {
-                message,
-                commentary,
-            });
+            return Err(EngineError::new(message, commentary));
         }
         Ok(Run { value, commentary })
     }
@@ -301,10 +308,7 @@ impl Engine {
                 .find(|line| !line.trim().is_empty())
                 .cloned()
                 .unwrap_or_else(|| "The farm stopped without saying why.".to_string());
-            return Err(EngineError {
-                message: last,
-                commentary,
-            });
+            return Err(EngineError::new(last, commentary));
         }
         Ok((stdout, commentary))
     }
@@ -371,14 +375,16 @@ mod tests {
 
     #[test]
     fn an_error_carries_the_commentary_that_led_to_it() {
-        let error = EngineError {
-            message: "Checksum mismatch; archive was not unpacked or run.".into(),
-            commentary: vec!["Downloading 3.5 MB from github.com.".into()],
-        };
+        let error = EngineError::new(
+            "Checksum mismatch; archive was not unpacked or run.",
+            vec!["Downloading 3.7 MB from github.com.".into()],
+        );
         assert_eq!(
             error.to_string(),
             "Checksum mismatch; archive was not unpacked or run."
         );
         assert_eq!(error.commentary.len(), 1);
+        // The window is handed what to offer next along with the sentence.
+        assert_eq!(error.trouble.head, "The download did not match the catalog");
     }
 }

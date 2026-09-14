@@ -260,8 +260,8 @@ function renderCardState() {
   const trouble = $("card-trouble");
   trouble.hidden = !bad;
   if (bad) {
-    $("card-trouble-head").textContent = bad.head || "That did not work";
-    $("card-trouble-text").textContent = bad.message;
+    $("card-trouble-head").textContent = bad.head;
+    $("card-trouble-text").textContent = bad.also ? `${bad.message} ${bad.also}` : bad.message;
     const row = $("card-trouble-actions");
     row.replaceChildren();
     if (bad.offerPort) {
@@ -306,26 +306,18 @@ function renderCardState() {
 }
 
 // Failure, in words -------------------------------------------------------
+// The engine says what went wrong and the Rust side says what to offer next,
+// so nothing here reads an error message looking for words in it.
 function readTrouble(id, error) {
-  const message = sentence(error);
-  const trouble = { message, head: "That did not work", offerPort: null, offerLog: false };
-
-  if (/Checksum mismatch/i.test(message) || /size does not match/i.test(message)) {
-    trouble.head = "The download did not match the catalog";
-    trouble.message = `${message} Nothing was unpacked and nothing on this computer changed. It is worth trying again: a download can arrive damaged.`;
-  } else if (/already in use/i.test(message)) {
-    trouble.head = "That port is taken";
-    const busy = Number((message.match(/Port (\d+) is already in use/) || [])[1]);
-    // An app the author made movable can be asked for another port. One that
-    // is nailed to a port cannot, and the engine says so in the same sentence.
-    if (/--port/.test(message) && busy) trouble.offerPort = busy + 1;
-  } else if (/timed out waiting for readiness|exited|farm\.log/i.test(message)) {
-    trouble.head = "It started and then stopped";
-    trouble.offerLog = true;
-  } else if (/took longer than/i.test(message)) {
-    trouble.head = "That took too long";
-  }
-  farm.trouble.set(id, trouble);
+  const said = typeof error === "object" && error && error.trouble ? error.trouble : {};
+  farm.trouble.set(id, {
+    message: sentence(error),
+    head: said.head || "That did not work",
+    also: said.also || "",
+    offerPort: said.offerPort ?? null,
+    offerLog: Boolean(said.offerLog),
+    commentary: (typeof error === "object" && error && error.commentary) || [],
+  });
 }
 
 // Actions ----------------------------------------------------------------
@@ -526,10 +518,14 @@ $("settings-doctor").addEventListener("click", async () => {
     const answer = await invoke("farm_doctor");
     box.replaceChildren();
     for (const finding of answer.findings || []) {
+      // A finding with nothing of its own to say carries its fix line as its
+      // message, so that the JSON and the printed output say the same words.
+      // Rendering both would say them twice.
+      const repeats = finding.fix && finding.message === `Fix: ${finding.fix}`;
       box.append(el("div", { class: `finding${finding.ok ? "" : " bad"}` },
         el("i", {}),
         el("div", {},
-          el("div", { text: finding.message }),
+          repeats ? null : el("div", { text: finding.message }),
           finding.fix ? el("div", { class: "fix", text: `Fix: ${finding.fix}` }) : null)));
     }
     if (!answer.findings || !answer.findings.length) box.append(el("p", { class: "lede", text: "Nothing to report." }));
