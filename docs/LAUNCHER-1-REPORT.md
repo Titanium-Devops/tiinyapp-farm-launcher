@@ -27,6 +27,20 @@ failure messages, whichever face somebody came in through.
 | The real-Tiiny gate | `scripts/verify-launcher.mjs` |
 | The two release workflows | `.github/workflows/` |
 
+Every command the brief lists is reachable from the window:
+
+| Command | Where it is in the window |
+| --- | --- |
+| `list` | The farm grid and the Running pane, on every refresh |
+| `status` | The Running pane, the tray, and a poll every eight seconds |
+| `install` | Plant it, on a card |
+| `start`, `stop` | The Running pane, the card, and the tray |
+| `update` | The Update button, and the tray's Update entry |
+| `remove` | Remove, on a row and on a card |
+| `check` | Look for app updates, on the Settings pane |
+| `doctor` | Check everything, on the Settings pane |
+| `device` | The first run pane, and Change it on Settings |
+
 The pinned versions live in exactly one file, `scripts/runtime.pins.json`, and
 the Settings pane reads them back out of the staged tree rather than repeating
 them.

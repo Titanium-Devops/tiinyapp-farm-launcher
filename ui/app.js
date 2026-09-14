@@ -511,6 +511,37 @@ async function flip(key) {
   }
 }
 
+// What the catalog has that this computer does not. The engine works it out;
+// the window only says it, and the Update buttons in the Running pane come from
+// the same comparison.
+$("settings-updates").addEventListener("click", async () => {
+  const box = $("doctor-findings");
+  box.replaceChildren(el("p", { class: "lede", text: "Looking." }));
+  try {
+    const answer = await invoke("farm_check");
+    box.replaceChildren();
+    const updates = answer.updates || [];
+    if (!updates.length) {
+      box.append(el("p", { class: "lede", text: "Everything you have installed is the newest the catalog has." }));
+    }
+    for (const row of updates) {
+      box.append(el("div", { class: "finding" },
+        el("i", {}),
+        el("div", {},
+          el("div", { text: `${row.name} ${row.installed} can go to ${row.available}.` }),
+          row.notes ? el("div", { class: "fix", text: row.notes }) : null)));
+    }
+    for (const id of answer.unreachable || []) {
+      box.append(el("div", { class: "finding bad" },
+        el("i", {}),
+        el("div", {}, el("div", { text: `${id} is installed here and the catalog did not answer about it.` }))));
+    }
+    await refresh();
+  } catch (error) {
+    box.replaceChildren(el("p", { class: "lede", text: sentence(error) }));
+  }
+});
+
 $("settings-doctor").addEventListener("click", async () => {
   const box = $("doctor-findings");
   box.replaceChildren(el("p", { class: "lede", text: "Checking." }));
