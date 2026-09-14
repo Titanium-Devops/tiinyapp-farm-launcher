@@ -47,12 +47,14 @@ and were identical. The four loaded models were `Qwen/Qwen3-8B` (chat, 28
 units), `Qwen/Qwen3-Embedding-0.6B` (embedding, 1), `Tongyi-MAI/Z-Image-Turbo`
 (image, 32) and `Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice` (tts, 7).
 
-One model was stopped and started again, three times over the course of the
-work, always the same one: `Qwen/Qwen3-8B`, the chat model. Every stop and start
-went through the farm's own gateway so that the key was handled the farm's way,
-read in process and sent in a header, never in a path, an argument or a log. The
-tool that did it is an operator tool in the scratch directory and is not part of
-the launcher. Nothing else on the device was touched.
+One model was stopped and started again several times over the course of the
+work, always the same one: `Qwen/Qwen3-8B`, the chat model, and always put back
+before anything else was done. Every stop and start went through the farm's own
+gateway so that the key was handled the farm's way, read in process and sent in
+a header, never in a path, an argument or a log. The tool that did it is an
+operator tool in the scratch directory and is not part of the launcher. Nothing
+else on the device was touched: no model was downloaded, removed or renamed, and
+nothing but that one model was ever stopped.
 
 ---
 
@@ -86,11 +88,24 @@ in its place six seconds later with a different process id, which is the two
 second pause plus the time the loop takes to notice. There was one watch before
 and one after, never two.
 
-The whole cycle was run once more against the build that carries the review
-fixes in section 5: the engine reported the unload 0.49 s after the stop was
-asked for and the load 0.96 s after the device said it was loaded, the window
-had cleared every refusal within 2.3 s of that line, and the Tiiny finished with
-the same four models, the same 68 of 100 units and the same 16 on disk.
+The cycle was run again against the build that carries the review fixes in
+section 5, this time with Story Lantern running so that the badge on a running
+app was in the picture, and with the window photographed every 0.8 seconds so
+the moment it changed could be read rather than estimated. Counting from the
+engine's watch line to the first frame in which the window was completely right,
+badge included:
+
+| Change | The window was completely right by |
+| --- | --- |
+| loaded | 0.23 s |
+| unloaded | 3.05 s |
+| loaded again | 0.39 s |
+
+Each of those is the first photographed frame in which nothing was left wrong,
+so the true figure is somewhere in the 0.8 seconds before it. The unload is the
+slow one of the three, and it is the only one where the menu bar is rebuilt in
+the same moment, which is a second reading of the device on the same thread. The Tiiny finished with the same four models, the same 68 of
+100 units and the same 16 on disk, checked item by item.
 
 ---
 
@@ -115,9 +130,9 @@ outright still leaks one, and that needs the engine's help, which is in section
 
 ---
 
-## 5. Seven things the review found, all fixed
+## 5. Eight things the review found, all fixed
 
-The automated review on the pull request raised seven findings. Every one was
+The automated review on the pull request raised eight findings. Every one was
 checked against the code and fixed rather than answered.
 
 | What it found | What was done |
@@ -129,8 +144,9 @@ checked against the code and fixed rather than answered.
 | Two missing kinds were each priced against the whole free budget, so a pair that cannot both be resident was offered | The picks are made against a budget that shrinks as each one is taken |
 | A kind with nothing downloaded and a kind whose models are too big got one sentence, telling somebody to unload something that would not help | Each kind gets the sentence that is true of it |
 | A `changed` event without a kind would write `None` over the kind and make an app look unmet | A change now merges the fields it carries and leaves out the ones it does not |
+| A model change refreshed the needs but not the running rows, so the badge on a running app waited for the eight second poll | The change now asks for the status too, after the chips are already right so the slower half never holds the faster one back |
 
-Three of the seven have their own tests. The other four are wiring, and two of
+Three of the eight have their own tests. The other five are wiring, and three of
 them were checked by hand against the running app.
 
 ---

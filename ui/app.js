@@ -677,7 +677,7 @@ async function readModels(fromWatch) {
     const answer = fromWatch
       ? await invoke("app_needs", { apps: appNeedsList() })
       : await invoke("farm_models", { apps: appNeedsList() });
-    farm.device_models = fromWatch ? answer.models : answer.models;
+    farm.device_models = answer.models;
     farm.needs = answer.needs || {};
     farm.modelsTrouble = null;
     // A refusal about a missing model is not true any more once the model is
@@ -691,6 +691,19 @@ async function readModels(fromWatch) {
   renderModels();
   renderInstalled();
   if (farm.open) renderCardState();
+  // The badge on a running app is the engine's own reading of what that app
+  // was using and has lost, and it only comes back on a status, which asks the
+  // Tiiny again and takes a moment. It is asked for after the chips are
+  // already right, so the slow half never holds the fast half back, and the
+  // badge arrives without waiting for the eight second poll.
+  if (fromWatch) {
+    try {
+      const status = await invoke("farm_status");
+      farm.running = status.running || [];
+      renderInstalled();
+      if (farm.open) renderCardState();
+    } catch { /* the poll will pick it up */ }
+  }
 }
 
 function units(n) {
