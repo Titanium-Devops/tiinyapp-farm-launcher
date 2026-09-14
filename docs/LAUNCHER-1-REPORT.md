@@ -566,6 +566,12 @@ Nothing in this section has been run.
 - **The interpreter fallback.** Decide whether an app that cannot reach the Tiiny
   under the bundled Python should quietly move to another one on the machine, or
   should say so. Today it moves, and the person is not told.
+- **The microphone, on a Tiiny with a voice model.** Section 2.7b. Everything is
+  declared and nothing has been through the system prompt, because the app under
+  test refuses before it reaches the microphone.
+- **What an app keeps when its port moves.** An app window's localStorage is per
+  origin, and the origin is the port, so an app the engine moves off a busy port
+  loses what it kept. Nobody has decided whether that matters.
 - **The beta.** Five people who are not developers, on both platforms. The number
   that matters is minutes from download to a running app, and how many of them
   needed a human.
