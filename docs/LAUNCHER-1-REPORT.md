@@ -360,8 +360,9 @@ Two the tests found, both fixed in the code rather than in the test:
 ### 2.11 What CI measured, on GitHub's runners
 
 Both workflows are green in UNSIGNED mode on the pull request, which is what
-this repository can reach before it has a single secret. Run 34891939998
-(macos) and 34891940052 (windows), on commit `1b1e661`:
+this repository can reach before it has a single secret. Runs 34894173004
+(macos) and 34894173078 (windows), on commit `7416a03`, which is the commit
+that installs the engine from a git URL rather than from PyPI:
 
 | Job | |
 | --- | --- |
@@ -376,15 +377,19 @@ The Windows numbers, measured on the runner rather than projected:
 
 | What | Measured |
 | --- | --- |
-| NSIS installer | 27,601,779 bytes |
+| NSIS installer | 27,621,001 bytes |
 | Runtime as published, unpacked | 144.7 MB in 3,963 files |
-| Runtime staged and pruned, with farm in it | 119.7 MB in 1,607 files |
+| Runtime staged and pruned, with farm in it | 119.7 MB in 1,608 files |
 | `farm --version` from the staged tree | `farm 0.1.11` |
 
 The design page projected about 60 MB for the Windows installer. It is 27.6 MB,
 smaller than the macOS disk image even though the tree inside it is twice the
-size, because NSIS compresses it harder than a disk image does. That run staged
-the engine from PyPI; carrying the finder adds a little to both platforms.
+size, because NSIS compresses it harder than a disk image does.
+
+That run is also the proof that the engine pin works away from this Mac: both
+platforms installed the farm from
+`git+https://github.com/Titanium-Devops/tiinyapp-farm@7e4cce6` and staged it,
+on runners that have never seen anybody's worktree.
 
 ---
 

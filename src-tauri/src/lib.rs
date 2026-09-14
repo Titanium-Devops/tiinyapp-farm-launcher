@@ -124,10 +124,23 @@ async fn farm_manifest(id: String) -> Result<Value, String> {
 /// about the network, rather than later, in the middle of an install.
 #[tauri::command]
 async fn device_find(app: tauri::AppHandle) -> Answer<Value> {
-    on_engine(app, |engine| {
+    let answer = on_engine(app, |engine| {
         engine.json(&["device", "--find"], Budget::PATIENT)
     })
-    .await
+    .await;
+    match answer {
+        // An engine older than the command it was asked for says so in words
+        // rather than showing somebody argparse's usage line. The window then
+        // offers the manual address, which has always worked.
+        Err(error) if engine::finder_missing(&error.message) => Ok(json!({
+            "command": "device",
+            "ok": false,
+            "blocked": false,
+            "unsupported": true,
+            "found": [],
+        })),
+        other => other,
+    }
 }
 
 /// Install, with the engine's own commentary arriving in the window as it is

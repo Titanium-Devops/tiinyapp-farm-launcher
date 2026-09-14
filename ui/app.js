@@ -453,6 +453,14 @@ async function lookForTiinys() {
       el("p", { class: "lede", style: "margin:0;font-size:13px", text: `The farm was looking with ${answer.python}.` })));
   }
 
+  if (answer.unsupported) {
+    box.append(el("p", { class: "lede", style: "margin:0",
+      text: "The farm inside this copy of the launcher is older than the command that looks for a Tiiny. Type the address in yourself for now; the next launcher update carries a farm that can look." }));
+    $("device-manual").hidden = false;
+    $("device-key-step").hidden = false;
+    return;
+  }
+
   const found = answer.found || [];
   if (!found.length) {
     if (!answer.blocked) {

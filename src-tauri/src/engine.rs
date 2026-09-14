@@ -387,6 +387,18 @@ pub fn pinned_settings(raw: &str, python: &str) -> Option<(String, Option<String
     Some((text, displaced))
 }
 
+/// Whether a failure is the engine being older than the command we asked it for.
+///
+/// `farm device --find` arrives in 0.1.12. A launcher built against 0.1.11 has
+/// to say that in words rather than show somebody argparse's usage line, which
+/// is the shape this failure takes: argparse writes "unrecognized arguments" to
+/// standard error and exits 2.
+pub fn finder_missing(message: &str) -> bool {
+    let lower = message.to_lowercase();
+    (lower.contains("unrecognized argument") || lower.contains("invalid choice"))
+        && lower.contains("--find")
+}
+
 /// Wait for the child, killing it when the budget runs out. Returns whether it
 /// exited cleanly.
 fn wait_with_budget(child: &mut Child, budget: Budget) -> Result<bool, EngineError> {
@@ -485,6 +497,20 @@ mod tests {
         assert_eq!(displaced, None);
         let back: Value = serde_json::from_str(&text).unwrap();
         assert_eq!(back["python"], OURS);
+    }
+
+    #[test]
+    fn an_engine_too_old_to_look_is_recognised_rather_than_shown_as_a_usage_line() {
+        // What argparse writes when farm 0.1.11 is handed 0.1.12's flag.
+        assert!(finder_missing(
+            "farm.py device: error: unrecognized arguments: --find"
+        ));
+        assert!(!finder_missing(
+            "Checksum mismatch; archive was not unpacked or run."
+        ));
+        assert!(!finder_missing(
+            "farm.py: error: unrecognized arguments: --nonsense"
+        ));
     }
 
     #[test]
