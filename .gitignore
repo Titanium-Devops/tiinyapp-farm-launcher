@@ -1,0 +1,7 @@
+node_modules/
+src-tauri/target/
+src-tauri/runtime/
+src-tauri/gen/
+docs/shots/*.tmp.png
+.DS_Store
+build/
