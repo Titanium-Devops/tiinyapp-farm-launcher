@@ -136,15 +136,29 @@ jobs:
         id: gate
         env:
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
         shell: bash
         run: |
           on_main='${{ github.ref == 'refs/heads/main' }}'
           sign=false
-          if [ "$on_main" = "true" ] && [ -n "$AZURE_CLIENT_ID" ]; then sign=true; fi
+          # All three, or none. azure/login needs every one of them, so a run
+          # that has two fails inside the login with a message about none of
+          # them, having already done the whole build. One secret set on its
+          # own used to cost a release that way: the gate said yes, the login
+          # said no, and the installer was never uploaded. Better to build
+          # unsigned and say which are missing.
+          missing=
+          [ -n "$AZURE_CLIENT_ID" ] || missing="$missing AZURE_CLIENT_ID"
+          [ -n "$AZURE_TENANT_ID" ] || missing="$missing AZURE_TENANT_ID"
+          [ -n "$AZURE_SUBSCRIPTION_ID" ] || missing="$missing AZURE_SUBSCRIPTION_ID"
+          if [ "$on_main" = "true" ] && [ -z "$missing" ]; then sign=true; fi
           echo "sign=$sign" >> "$GITHUB_OUTPUT"
-          echo "sign=$sign on_main=$on_main"
-          if [ "$sign" != "true" ]; then
-            echo "::notice::Building UNSIGNED. Either this is not a push to main, or AZURE_CLIENT_ID is not set. The installer will build; it will not carry an Authenticode signature."
+          echo "sign=$sign on_main=$on_main missing=${missing:-none}"
+          if [ "$sign" != "true" ] && [ -n "$missing" ]; then
+            echo "::notice::Building UNSIGNED because these are not set:$missing. The installer will build and upload; it will not carry an Authenticode signature."
+          elif [ "$sign" != "true" ]; then
+            echo "::notice::Building UNSIGNED because this is not a push to main. The installer will build; it will not carry an Authenticode signature."
           fi
 
       # --- Azure Trusted Signing --------------------------------------

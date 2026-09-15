@@ -20,6 +20,11 @@
         "asset": "cpython-3.11.16+20260901-x86_64-pc-windows-msvc-install_only.tar.gz",
         "sha256": "6be524fa6752af802146a4adc7d098565425b0b1c166e19a5a7a4c8cccb86bf6",
         "size": 47940627
+      },
+      "x86_64-unknown-linux-gnu": {
+        "asset": "cpython-3.11.16+20260901-x86_64-unknown-linux-gnu-install_only.tar.gz",
+        "sha256": "faa0758583a63f14c5eee516af82738403b59c13edda6fc0a21d953febd89eed",
+        "size": 48910466
       }
     }
   }

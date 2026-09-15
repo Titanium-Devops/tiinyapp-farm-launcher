@@ -1,6 +1,6 @@
 [package]
 name = "tiinyapp-farm-launcher"
-version = "0.1.0"
+version = "0.1.1"
 description = "The Tiiny App Farm launcher"
 authors = ["Titanium Computing"]
 edition = "2021"

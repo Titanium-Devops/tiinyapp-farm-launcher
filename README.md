@@ -1,6 +1,6 @@
 # Tiiny App Farm launcher
 
-A small desktop app for macOS and Windows that installs and runs
+A small desktop app for macOS, Windows and Linux that installs and runs
 [Tiiny App Farm](https://tiinyapp.farm) apps for somebody who will never open a
 terminal. It carries its own CPython and the `tiinyapp-farm` command line tool
 inside itself, so there is nothing to install first: no Python, no Node, no
@@ -26,7 +26,8 @@ needs.
 | The engine: CPython and `tiinyapp-farm`, pinned | `scripts/runtime.pins.json` |
 | Staging the engine into the bundle | `scripts/stage-runtime.mjs` |
 | Signing the engine's Mach-O files | `scripts/sign-runtime.sh` |
-| The release pipeline | `.github/workflows/` |
+| The release pipeline | `.github/workflows/` (one per platform) |
+| What changed in each release | `CHANGELOG.md`, which the site's history page reads |
 
 ## Building it
 
@@ -79,7 +80,7 @@ node scripts/publish-release.mjs --bucket <r2-bucket>            # dry run
 node scripts/publish-release.mjs --bucket <r2-bucket> --publish
 ```
 
-It refuses a commit whose two runs did not both succeed, refuses a disk image
+It refuses a commit whose three runs did not all succeed, refuses a disk image
 that is not signed, notarised and stapled, refuses a feed whose signatures are
 not the ones beside the bundles it names, and uploads `latest.json` last so the
 feed never names a download that is not there yet. Its own header says what it
