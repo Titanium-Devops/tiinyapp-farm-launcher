@@ -31,6 +31,8 @@ const farm = {
   device_models: null,   // the last snapshot of what the Tiiny has loaded
   needs: {},             // id -> what that means for one app, decided in Rust
   modelsTrouble: null,   // what the watch said when it could not look
+  loading: new Set(),    // model ids the Tiiny is being asked to load
+  shortBy: {},           // model id -> NPU units it is short by, decided in Rust
   trouble: new Map(), // id -> { message, commentary }
   open: null,
 };
@@ -447,10 +449,10 @@ async function start(id, port, load) {
       const kinds = (answer.missing || []).map((row) => row.kind).join(" and ");
       let said = `${nameOf(id)} needs ${kinds} on your Tiiny, and it is not loaded.`;
       if (load) {
-        // farm 0.1.14 answers a --json start with the missing kinds before it
-        // ever tries to load one, so --load does nothing on this path. Saying
-        // that is better than leaving somebody pressing a button twice.
-        said += " The farm was asked to load it and did not: farm 0.1.14 answers this in JSON before it tries, so Load and start cannot work until the engine is fixed.";
+        // Load and start was pressed and the farm still could not do it, so the
+        // reason is the device rather than the button: no model of that kind on
+        // the disk, or none that fits in the units that are free.
+        said += " The farm tried to load one first and could not, so either your Tiiny has no model of that kind or none of them fits in the NPU units that are free.";
       }
       readTrouble(id, { message: said });
       const held = farm.trouble.get(id);
@@ -458,7 +460,14 @@ async function start(id, port, load) {
       await readModels(true);
       return;
     }
-    say(answer.already ? `${nameOf(id)} was already running.` : `${nameOf(id)} is running on port ${answer.port}.`);
+    // A start that loaded something first says what it loaded, because a model
+    // arriving on the Tiiny is a change somebody should be told about rather
+    // than find later.
+    const brought = (answer.loaded || []).map((row) => (typeof row === "string" ? row : row.id)).filter(Boolean);
+    const also = brought.length ? ` It loaded ${brought.join(" and ")} on your Tiiny first.` : "";
+    say(answer.already
+      ? `${nameOf(id)} was already running.`
+      : `${nameOf(id)} is running on port ${answer.port}.${also}`);
   } catch (error) {
     readTrouble(id, error);
   } finally {
@@ -678,6 +687,7 @@ async function readModels(fromWatch) {
       ? await invoke("app_needs", { apps: appNeedsList() })
       : await invoke("farm_models", { apps: appNeedsList() });
     farm.device_models = answer.models;
+    farm.shortBy = answer.shortBy || {};
     farm.needs = answer.needs || {};
     farm.modelsTrouble = null;
     // A refusal about a missing model is not true any more once the model is
@@ -711,13 +721,13 @@ function units(n) {
   return n === 1 ? "1 NPU unit" : `${n} NPU units`;
 }
 
-function modelRow(row, loaded, free) {
-  // A model that costs more than the Tiiny has left cannot be loaded at all,
-  // whatever the engine grows the ability to do, so the row says so.
-  const short = !loaded && row.units !== null && row.units !== undefined
-    && free !== null && free !== undefined && row.units > free
-    ? row.units - free
-    : 0;
+function modelRow(row, loaded) {
+  // A model that costs more than the Tiiny has left cannot be loaded, so the
+  // row says how much it is short by and no button is offered at all. How much
+  // is Rust's answer, from `Snapshot::short_by`, which is the engine's rule
+  // written once. Nothing here works it out.
+  const short = loaded ? 0 : (farm.shortBy[row.id] || 0);
+  const busy = farm.loading.has(row.id);
   const facts = el("div", { class: "m" },
     el("span", { text: row.kind || row.capability || "kind unknown" }),
     el("span", { text: units(row.units) }),
@@ -725,13 +735,13 @@ function modelRow(row, loaded, free) {
     short ? el("span", { class: "over", text: `${short} more than are free` }) : null);
   const act = el("div", { class: "act" });
   if (!loaded) {
-    // The engine can load a model only as part of starting an app that needs
-    // it. Saying so is better than a button that cannot work.
-    act.append(el("button", { class: "btn small", type: "button", disabled: true,
-      title: short
-        ? `Only ${free} of the Tiiny's NPU units are free and this one costs ${row.units}`
-        : "farm 0.1.14 loads a model as part of starting an app that needs it" },
-      document.createTextNode("Load")));
+    if (short) {
+      act.append(el("span", { class: "chip", text: "No room for it" }));
+    } else {
+      act.append(el("button", { class: "btn small", type: "button", disabled: busy,
+        onclick: () => loadModel(row) },
+        document.createTextNode(busy ? "Loading" : "Load")));
+    }
   }
   return el("div", { class: "approw" },
     el("img", { src: "farm-mark.png", alt: "" }),
@@ -763,9 +773,38 @@ function renderModels() {
   const diskBox = $("models-disk");
   diskBox.replaceChildren();
   $("models-disk-note").textContent = disk.length
-    ? "These are downloaded and cost nothing until they are loaded. The farm loads one as part of starting an app that needs it, which is the Load and start button on the app."
+    ? "These are downloaded and cost nothing until they are loaded. Loading one takes NPU units away from what is free, and anything that does not fit says so instead of offering a button."
     : "Nothing else is downloaded. TiinyOS is where a model is downloaded.";
-  for (const row of disk) diskBox.append(modelRow(row, false, npu.available));
+  for (const row of disk) diskBox.append(modelRow(row, false));
+}
+
+// Loading one model, because somebody pressed Load on its row. Nothing here
+// decides which model: the row is the one that was pressed.
+async function loadModel(row) {
+  farm.loading.add(row.id);
+  farm.modelsTrouble = null;
+  renderModels();
+  try {
+    // The engine answers with the whole device again, so the pane and every
+    // card move the moment the model is there rather than when the watch next
+    // looks. The watch still says so a second later and nothing changes twice.
+    const answer = await invoke("farm_load_model", { id: row.id, apps: appNeedsList() });
+    farm.device_models = answer.models;
+    farm.shortBy = answer.shortBy || {};
+    farm.needs = answer.needs || {};
+    farm.modelsTrouble = null;
+    for (const [id, bad] of [...farm.trouble]) {
+      if (bad.aboutModels && (farm.needs[id] || {}).canStart) farm.trouble.delete(id);
+    }
+    say(`${row.id} is loaded on your Tiiny.`);
+  } catch (error) {
+    farm.modelsTrouble = sentence(error);
+  } finally {
+    farm.loading.delete(row.id);
+    renderModels();
+    renderInstalled();
+    if (farm.open) renderCardState();
+  }
 }
 
 // A model changing on the Tiiny arrives here within the engine's three seconds.
