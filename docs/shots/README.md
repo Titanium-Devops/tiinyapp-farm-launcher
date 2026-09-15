@@ -6,7 +6,8 @@ them. Taken on a MacBook Pro (Apple M5 Max, macOS 26.6.2) on 2026-09-14 from the
 ad hoc signed 0.1.0 build against Jason's Tiiny at 172.17.7.177, with the engine
 pointed at a scratch home so nothing of his was touched. Pictures 01 to 15 were
 taken against engine farm 0.1.13, 16 to 23 against farm 0.1.14, 24 to 27 against farm 0.1.15
-from PyPI, and 28 against farm 0.1.17.
+from PyPI, 28 against farm 0.1.17, and 29 on the
+published release itself.
 
 The window is 1100 by 720 points in all of them except `10-smallest-size.png`
 and `12-smallest-first-run.png`, which are the smallest size the launcher
@@ -43,6 +44,7 @@ bar menu rather than the window.
 | `26-npu-after-a-load.png` | The budget at the top of the same pane, 28 of 100 free, with the bar moved to match. |
 | `27-load-and-start.png` | Load and start on an app whose chat model was not loaded. The farm loaded one and then started the app, and the window says which one: Daybreak is running on port 8811, and it loaded Qwen/Qwen3-8B on the Tiiny first. |
 | `28-usual-port.png` | Daybreak's card while it is stopped, after a run on a port its manifest does not ask for. The needs line says the 8811 it asks for; the line under it says it usually comes up on 8813, because that is where it ran last. Made by starting it with --port 8814, stopping it, and opening the card, which is the case that matters: where an app will come up is a question somebody asks before pressing Start. When the two numbers agree the second line is not drawn. |
+| `29-gatekeeper-first-open.png` | What a person meets the first time they open the download: macOS asking whether to open an app from the internet, and saying "Apple checked it for malicious software and none was detected", which is the notarisation answering in the dialog. Cropped to the alert; the rest of that screen was somebody's desktop. |
 
 Three serials are blacked out, in `01`, `11` and `12`. They identify one person's
 device, they are not something the launcher handles, and they do not need to
