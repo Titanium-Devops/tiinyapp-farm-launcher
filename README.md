@@ -69,6 +69,22 @@ would teach somebody to leave their key lying about in a file.
 `FARM_LAUNCHER_HOME=/tmp/farm-gate` works on the app too, and points the
 launcher's engine at a scratch home for a test run.
 
+## Putting a release where people download it
+
+The two workflows build, sign, notarise and stop at GitHub Actions artifacts.
+`scripts/publish-release.mjs` is the step after:
+
+```sh
+node scripts/publish-release.mjs --bucket <r2-bucket>            # dry run
+node scripts/publish-release.mjs --bucket <r2-bucket> --publish
+```
+
+It refuses a commit whose two runs did not both succeed, refuses a disk image
+that is not signed, notarised and stapled, refuses a feed whose signatures are
+not the ones beside the bundles it names, and uploads `latest.json` last so the
+feed never names a download that is not there yet. Its own header says what it
+needs and what it cannot check.
+
 ## Tests
 
 ```sh
