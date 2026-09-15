@@ -18,15 +18,15 @@ engine as the other two.
 
 | | |
 | --- | --- |
-| Asset | `cpython-3.11.16+20260901-x86_64-unknown-linux-gnu-install_only.tar.gz` |
-| Size | 48,910,466 bytes |
-| SHA-256 | `faa0758583a63f14c5eee516af82738403b59c13edda6fc0a21d953febd89eed` |
+| Asset | `cpython-3.11.16+20260901-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz` |
+| Size | 30,778,779 bytes |
+| SHA-256 | `64427febea27864d136db46c8efe968eb6fa5ca2813ce1dca4bb95aec31cb2e4` |
 
-Measured here: the download, the checksum and the prune all run on this Mac and
-the prune removes the same 14 paths it removes for the other targets. What
-cannot run here is the step after, because staging installs `farm` into the
-interpreter it just unpacked and a Linux interpreter does not execute on macOS.
-That used to fail with a bare `ENOEXEC` from inside a spawn; it now says so:
+Staging a Linux tree only works on Linux, because it installs `farm` into the
+interpreter it has just unpacked and a Linux interpreter does not execute on
+macOS. Every Linux number in this report therefore comes from the runner rather
+than from this Mac. Asking for it here used to fail with a bare `ENOEXEC` from
+inside a spawn; it now says why:
 
 > This is a darwin machine and x86_64-unknown-linux-gnu is a runtime for another
 > one. Staging runs the interpreter it just unpacked, so each target is staged
@@ -38,15 +38,42 @@ person can check is the SHA-256, so it is written by the runner that built the
 file, verified by the publish step, and published in the release history beside
 the download.
 
-Two things the pruning does differently on Linux, both deliberate:
+### The first Linux build was 123 MB, and most of it was not needed
 
-- **`lib/libpython3.11.so` stays.** The macOS build drops the equivalent dylib
-  because nothing in the pruned tree links against it, measured. That has not
-  been measured on a Linux machine, so the file stays. It costs size; an app
-  that will not start costs more.
-- **No Mach-O count and no signing pass.** Both are macOS ideas. The staged
-  `runtime.json` records zero, which is what the macOS workflow's inside-out
-  signing check compares against and what Linux has none of.
+| | Before | After |
+| --- | --- | --- |
+| The archive fetched | 48.9 MB | 30.8 MB |
+| The staged tree | 142.1 MB in 4906 files, pruned to 129.0 MB | 78.3 MB in 4906 files, pruned to 44.6 MB |
+| The AppImage | 123,333,112 bytes | 100,809,208 bytes |
+
+Two measured findings, both resting on the same argument the macOS dylib drop
+already rests on.
+
+**`bin/python3.11` is statically linked.** Its ELF dynamic section names
+`libpthread`, `libdl`, `libutil`, `librt`, `libm` and `libc`, and no
+`libpython`. Every extension module in `lib-dynload` was read the same way and
+none of them names it either. The only thing that does is `lib/libpython3.so`,
+a stub whose purpose is to be linked by something embedding Python, and the
+launcher does not embed Python, it spawns the binary. So
+`lib/libpython3.11.so.1.0`, 52.6 MB, comes out with its symlinks and its stub.
+The Linux run after that change prints `farm 0.1.17` from the staged tree, so
+the interpreter still works without it, measured on Linux rather than argued
+from macOS.
+
+**The interpreter carried full debug sections**, which is why the binary alone
+was 55 MB. python-build-standalone publishes a stripped build of the same
+interpreter for exactly this, so Linux is pinned to `install_only_stripped`.
+
+The staged tree is now 44.6 MB against 39.3 MB for macOS, which is the
+comparison worth making. The AppImage is still 96 MB, and that is AppImage
+rather than us: `linuxdeploy` bundles the GTK and WebKit libraries it finds so
+the file runs on a machine that has none of them. Trimming that further means
+deciding which system libraries a stranger's distribution already has, and
+nothing here can test that guess.
+
+**No Mach-O count and no signing pass.** Both are macOS ideas. The staged
+`runtime.json` records zero, which is what the macOS workflow's inside-out
+signing check compares against and what Linux has none of.
 
 **The updater does not cover Linux, and `latest.json` says nothing about it.**
 Tauri can update an AppImage, but I have no Linux machine and cannot watch an
@@ -125,9 +152,9 @@ missing rather than leaving somebody to guess.
   whole of what a build runner can say about a desktop app. **The window, the
   tray, the deep link, the per-app windows and whether the bundled interpreter
   reaches a Tiiny over the local network are all untested on Linux.**
-- The Linux runtime has not been staged end to end anywhere yet, because the
-  install step needs a Linux host. The first run of the new workflow is the
-  first time that happens.
+- **Whether the AppImage runs on any distribution other than the runner's
+  Ubuntu 22.04.** That is the usual AppImage question and the reason its
+  bundled libraries were left alone.
 - No Linux update has been attempted, which is why the feed leaves Linux out.
 - `releases.json` has never been written to the bucket. The read, the merge and
   the ordering are exercised offline; the first real read-modify-write is the
