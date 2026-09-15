@@ -1,7 +1,7 @@
 # LAUNCHER-3: the Load buttons work
 
-Built 2026-09-14 on top of LAUNCHER-2 (`f301dd4`), against the engine side of
-MODELS-2.
+Built 2026-09-14 on top of LAUNCHER-2 (`f301dd4`), against farm 0.1.15 from
+PyPI, which is the engine side of MODELS-2.
 
 **Every number below was measured on one machine: a MacBook Pro, Apple M5 Max,
 macOS 26.6.2 (25G83), arm64, against Jason's Tiiny at 172.17.7.177.** Nothing
@@ -42,8 +42,10 @@ Recorded before anything was touched, and again at the end:
 | Models loaded | 4 | 4 |
 | Models on disk | 16 | 16 |
 
-Compared item by item, three times: after the model that was loaded by hand was
-taken off again, after Load and start, and at the end. Identical every time.
+Compared item by item, five times: after the model that was loaded by hand was
+taken off again, after Load and start, at the end of the run against the
+engine's own worktree, and then twice more through the whole cycle again against
+the published 0.1.15. Identical every time.
 
 Two models were moved during the work and both were put back. `zai-org/GLM-OCR`,
 4 units, was loaded from the pane and then unloaded. `Qwen/Qwen3-8B`, the chat
@@ -55,11 +57,14 @@ the change.
 
 ## 3. Loading one model, measured
 
-| | |
-| --- | --- |
-| Load pressed on `zai-org/GLM-OCR` | 0.0 s |
-| The button read Loading, continuously, for | 13 s and counting |
-| The device first reported it loaded | 30.8 s |
+| | Against the worktree | Against 0.1.15 from PyPI |
+| --- | --- | --- |
+| Load pressed on `zai-org/GLM-OCR` | 0.0 s | 0.0 s |
+| The device first reported it loaded | 30.8 s | 16.5 s |
+
+The difference between the two is the device, not the launcher: the same model
+took twice as long to become resident the first time. The button reads Loading
+for the whole of it either way.
 
 Thirty seconds is the device putting a model in the NPU, not the window waiting
 on itself. The button says Loading for the whole of it and nothing else on the
@@ -85,14 +90,14 @@ The chat model was unloaded, which left three apps refusing to start with the
 reason beside a greyed Start and a Load and start button next to it. Then Load
 and start was pressed.
 
-| | Daybreak | Story Lantern |
-| --- | --- | --- |
-| Pressed | 0.0 s | 0.0 s |
-| The app was running | 13.6 s | 13.7 s |
-| What it loaded first | `Qwen/Qwen3-8B` | `Qwen/Qwen3-8B` |
+| | Daybreak | Story Lantern | Daybreak, on 0.1.15 |
+| --- | --- | --- | --- |
+| Pressed | 0.0 s | 0.0 s | 0.0 s |
+| The app was running and said so | 13.6 s | 13.7 s | 12.9 s |
+| What it loaded first | `Qwen/Qwen3-8B` | `Qwen/Qwen3-8B` | `Qwen/Qwen3-8B` |
 
-The window says so rather than leaving it to be discovered: "Story Lantern is
-running on port 8421. It loaded Qwen/Qwen3-8B on your Tiiny first."
+The window says so rather than leaving it to be discovered: "Daybreak is running
+on port 8811. It loaded Qwen/Qwen3-8B on your Tiiny first."
 (`docs/shots/27-load-and-start.png`). The name comes from the engine's own
 `loaded` list, so the window is not guessing which model was picked.
 
@@ -154,6 +159,12 @@ so these are the numbers a fresh Mac gives.**
 | `cargo clippy --all-targets -- -D warnings` | clean |
 | `cargo fmt --check` | clean |
 | `npm run tauri build` | app and dmg built, ad hoc signed |
+| The engine inside the built app | `farm 0.1.15`, installed from PyPI |
+
+`scripts/runtime.pins.json` names `0.1.15` and has no `farmFrom`, so the runners
+fetch the same release this Mac did. The whole live cycle in sections 3 and 4
+was run once against the engine's own worktree and then again, from a clean
+stage, against the published release.
 
 ---
 

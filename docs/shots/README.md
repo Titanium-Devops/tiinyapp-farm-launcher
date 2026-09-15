@@ -5,8 +5,8 @@ than by screen region, so nothing else that happened to be on the screen is in
 them. Taken on a MacBook Pro (Apple M5 Max, macOS 26.6.2) on 2026-09-14 from the
 ad hoc signed 0.1.0 build against Jason's Tiiny at 172.17.7.177, with the engine
 pointed at a scratch home so nothing of his was touched. Pictures 01 to 15 were
-taken against engine farm 0.1.13, 16 to 23 against farm 0.1.14, and 24 to 27
-against farm 0.1.15.
+taken against engine farm 0.1.13, 16 to 23 against farm 0.1.14, and 24 to 27 against
+farm 0.1.15 from PyPI.
 
 The window is 1100 by 720 points in all of them except `10-smallest-size.png`
 and `12-smallest-first-run.png`, which are the smallest size the launcher
@@ -41,7 +41,7 @@ bar menu rather than the window.
 | `24-models-load-live.png` | The downloaded models with the Load buttons live. Anything that fits the 32 NPU units free has a button; anything that does not says how much more it needs and offers no button at all, because a button that cannot work is worse than a sentence. |
 | `25-models-after-a-load.png` | The same list a minute later, after Load was pressed on the 4 unit OCR model. It has gone from the list because it is loaded now, and every shortfall underneath it has grown by four: `openai/gpt-oss-20b` had a live button at exactly 32 units and now says it is 4 short. Nothing was typed to make that happen. |
 | `26-npu-after-a-load.png` | The budget at the top of the same pane, 28 of 100 free, with the bar moved to match. |
-| `27-load-and-start.png` | Load and start on an app whose chat model was not loaded. The farm loaded one and then started the app, and the window says which one: Story Lantern is running on port 8421, and it loaded Qwen/Qwen3-8B on the Tiiny first. |
+| `27-load-and-start.png` | Load and start on an app whose chat model was not loaded. The farm loaded one and then started the app, and the window says which one: Daybreak is running on port 8811, and it loaded Qwen/Qwen3-8B on the Tiiny first. |
 
 Three serials are blacked out, in `01`, `11` and `12`. They identify one person's
 device, they are not something the launcher handles, and they do not need to

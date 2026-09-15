@@ -1,7 +1,6 @@
 {
-  "comment": "Everything the launcher carries inside itself, pinned. Change a number here and scripts/stage-runtime.mjs fetches something else; nothing else in the repository names a version. farmFrom is a local worktree while the engine and the launcher are being written together, and must be gone before this branch is merged.",
-  "farm": "0.1.14",
-  "farmFrom": "/Users/sem/code/tiinyapp-farm-models2",
+  "comment": "Everything the launcher carries inside itself, pinned. Change a number here and scripts/stage-runtime.mjs fetches something else; nothing else in the repository names a version.",
+  "farm": "0.1.15",
   "python": {
     "release": "20260901",
     "version": "3.11.16",
