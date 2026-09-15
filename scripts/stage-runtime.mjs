@@ -343,13 +343,23 @@ async function main() {
   log(`cache    ${dropCaches(tree)} __pycache__ directories removed`);
   log(`links    ${dropLinks(tree)} symlinks removed`);
 
-  // Only on macOS. The Linux tree has lib/libpython3.11.so, and whether the
-  // pruned tree links against it has not been measured on a Linux machine, so
-  // it stays: 18 MB is a cheaper price than an app that will not start.
-  if (!flag("--keep-dylib") && macos) {
-    for (const hit of expand(tree, "lib/libpython3.11.dylib")) {
-      rm(hit);
-      log(`dylib    removed ${path.relative(tree, hit)}, which nothing in the tree links against`);
+  // The shared library nothing in the pruned tree links against. On macOS that
+  // is libpython3.11.dylib at 18 MB; on Linux it is libpython3.11.so.1.0 at
+  // 52.6 MB, with two symlinks beside it and a stub, libpython3.so, whose only
+  // purpose is to be linked by something embedding Python. The launcher does
+  // not embed it, it spawns bin/python3.11, and that binary is statically
+  // linked: its ELF dynamic section names libpthread, libdl, libutil, librt,
+  // libm and libc, and no libpython. Every extension module in lib-dynload was
+  // read the same way and none of them names it either.
+  if (!flag("--keep-dylib") && !windows) {
+    const shared = macos
+      ? ["lib/libpython3.11.dylib"]
+      : ["lib/libpython3.11.so.1.0", "lib/libpython3.11.so", "lib/libpython3.so"];
+    for (const name of shared) {
+      for (const hit of expand(tree, name)) {
+        rm(hit);
+        log(`dylib    removed ${path.relative(tree, hit)}, which nothing in the tree links against`);
+      }
     }
   }
 
