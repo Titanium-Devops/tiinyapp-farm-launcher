@@ -275,7 +275,16 @@ jobs:
             export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="${IN_TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}"
           fi
 
-          # createUpdaterArtifacts is off in the checked in config, because
+          # src-tauri/tauri.updater.conf.json is laid over the checked in config on
+      # a run that has the updater signing key, and it carries one line:
+      # createUpdaterArtifacts true. It carries nothing else, not even a comment
+      # explaining itself, because Tauri's config schema refuses any key it does
+      # not know and a JSON file has nowhere else to put prose. That refusal cost
+      # a release: the overlay had a "comment" key in it from the day it was
+      # written, and nothing noticed until the first run that actually had the
+      # key and took this branch.
+      #
+      # createUpdaterArtifacts is off in the checked in config, because
           # turning it on without a signing key fails the build. The overlay
           # turns it on only when the key is there. The output is kept so the
           # step below can fail on a warning the CLI only prints; piped through
