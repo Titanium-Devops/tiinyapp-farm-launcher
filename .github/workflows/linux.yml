@@ -1,0 +1,127 @@
+name: linux
+
+# The third platform, and the honest one about what it cannot promise.
+#
+# There is no notarisation on Linux and nothing to sign an AppImage against that
+# a stranger's machine would check, so this builds unsigned and says so. That is
+# not a gap in this workflow, it is how desktop Linux works: the checksum
+# published beside the file is what somebody can verify, and the release page
+# carries it.
+#
+# Nothing here can be exercised beyond the runner. There is no Linux machine on
+# this team, so the tray, the deep link and the window are built and never seen.
+# The report says that in those words rather than implying otherwise.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_HOME: ${{ github.workspace }}/.cargo
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  bundle:
+    name: Linux AppImage (x86_64, unsigned)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      # Tauri 2 on Ubuntu 22.04. webkit2gtk 4.1 is the one Tauri 2 links
+      # against; 4.0 is Tauri 1 and installing both is how a build picks the
+      # wrong one. libxdo is the tray and the global shortcut, patchelf and
+      # the FUSE library are what the AppImage bundler itself needs.
+      - name: What Tauri needs on this runner
+        run: |
+          set -eu
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            libxdo-dev \
+            libssl-dev \
+            libfuse2 \
+            patchelf \
+            desktop-file-utils \
+            file
+          pkg-config --modversion webkit2gtk-4.1
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup target add x86_64-unknown-linux-gnu
+          rustc --version
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.CARGO_HOME }}/registry
+            ${{ env.CARGO_HOME }}/git
+            src-tauri/target
+          key: linux-cargo-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: linux-cargo-
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - run: npm ci
+
+      # The same staged runtime as the other two platforms, from the same pins
+      # file, pruned by the same list. The interpreter has to run here, which is
+      # why each platform stages its own.
+      - name: Stage the bundled Python and the pinned farm
+        run: node scripts/stage-runtime.mjs --target x86_64-unknown-linux-gnu
+
+      - name: The staged engine answers before anything is bundled
+        run: |
+          set -eu
+          ./src-tauri/runtime/bin/python3.11 -m farm.farm --version
+          node -p "require('./src-tauri/runtime/runtime.json').target"
+
+      - name: Clean stale bundle outputs
+        run: rm -rf src-tauri/target/release/bundle/appimage
+
+      - name: tauri build (AppImage, unsigned)
+        run: npm run tauri -- build --bundles appimage
+
+      # An AppImage is one file and it has to be executable to be anything at
+      # all. This is the whole of what can be checked without a Linux desktop:
+      # it exists, it is an ELF executable, and it is the size a bundle with a
+      # Python tree inside it should be.
+      - name: What was built, checked as far as a runner can
+        run: |
+          set -eu
+          APP=$(ls src-tauri/target/release/bundle/appimage/*.AppImage | head -1)
+          ls -l "$APP"
+          test -x "$APP"
+          file "$APP" | grep -q ELF
+          SIZE=$(stat -c%s "$APP")
+          if [ "$SIZE" -lt 30000000 ]; then
+            echo "::error::$APP is $SIZE bytes, which is too small to hold the bundled Python."
+            exit 1
+          fi
+          echo "the AppImage is an executable ELF of $SIZE bytes"
+
+      # What the bytes are, written by the machine that made them, so whatever
+      # publishes them later has something to compare against. Same shape as the
+      # other two platforms write.
+      - name: Record what the bytes are
+        run: |
+          set -eu
+          cd src-tauri/target/release/bundle/appimage
+          sha256sum *.AppImage > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Upload the AppImage
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiinyapp-farm-launcher-linux-appimage
+          path: |
+            src-tauri/target/release/bundle/appimage/*.AppImage
+            src-tauri/target/release/bundle/appimage/SHA256SUMS
+          if-no-files-found: error

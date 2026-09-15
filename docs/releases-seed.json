@@ -1,0 +1,30 @@
+[
+  {
+    "version": "0.1.0",
+    "date": "2026-09-14",
+    "commit": "238c9a86c71fc1f495fd88564be7cd7b3c22adf7",
+    "files": {
+      "mac-arm64": {
+        "name": "Tiiny-App-Farm_0.1.0_aarch64.dmg",
+        "size": 25288602,
+        "sha256": "b339e69746eb103b6e7d1005e40a287a144709869e22a41df6d7ecc218cd1b42",
+        "signed": true,
+        "notarised": true
+      },
+      "mac-x64": {
+        "name": "Tiiny-App-Farm_0.1.0_x64.dmg",
+        "size": 25964260,
+        "sha256": "62301dbbe5ccd4eb60378e9c908867c5105ab1c0895a9c0410dd27040d776c97",
+        "signed": true,
+        "notarised": true
+      },
+      "windows-x64": {
+        "name": "Tiiny-App-Farm_0.1.0_x64-setup.exe",
+        "size": 27720608,
+        "sha256": "d8a02af90819f9b8d00dcf57215fa6d26ca8ed0f8aa500d055e24b38bfa7375f",
+        "signed": true,
+        "notarised": false
+      }
+    }
+  }
+]

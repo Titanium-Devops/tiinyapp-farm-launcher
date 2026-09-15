@@ -39,9 +39,17 @@ function hostTarget() {
     return process.arch === "x64" ? "x86_64-apple-darwin" : "aarch64-apple-darwin";
   }
   if (process.platform === "win32") return "x86_64-pc-windows-msvc";
+  if (process.platform === "linux") {
+    if (process.arch !== "x64") {
+      throw new Error(
+        `Only x86_64 Linux has a pinned runtime; ${process.arch} does not. ` +
+          `pip install tiinyapp-farm works on any architecture.`,
+      );
+    }
+    return "x86_64-unknown-linux-gnu";
+  }
   throw new Error(
-    `The launcher is a macOS and Windows app; ${process.platform} has no pinned runtime. ` +
-      `Linux users already have pip install tiinyapp-farm.`,
+    `${process.platform} has no pinned runtime. pip install tiinyapp-farm works there.`,
   );
 }
 
@@ -51,7 +59,25 @@ if (!pin) {
   throw new Error(`No runtime is pinned for ${target}. The pinned targets are ${Object.keys(pins.python.targets).join(", ")}.`);
 }
 
+// The interpreter has to run here, to install farm into itself and to answer
+// with its version, so the tree can only be staged on the kind of machine it is
+// for. Saying that plainly beats an ENOEXEC from deep inside a spawn.
+const hostKind = process.platform === "darwin" ? "apple-darwin"
+  : process.platform === "win32" ? "windows"
+  : process.platform === "linux" ? "linux" : process.platform;
+if (!target.includes(hostKind)) {
+  throw new Error(
+    `This is a ${process.platform} machine and ${target} is a runtime for another one. ` +
+      `Staging runs the interpreter it just unpacked, so each target is staged on its own ` +
+      `platform: the workflows do that, one runner each.`,
+  );
+}
+
 const windows = target.includes("windows");
+// Mach-O files and the dylib question are macOS only. Linux has neither a
+// notary nor a bundler that signs what is inside an app, so the count is zero
+// there and the shared library stays where it is.
+const macos = target.includes("apple-darwin");
 const out = path.join(root, "src-tauri", "runtime");
 const cache = path.join(root, "build", "cache");
 const work = path.join(root, "build", "stage-" + target);
@@ -317,16 +343,29 @@ async function main() {
   log(`cache    ${dropCaches(tree)} __pycache__ directories removed`);
   log(`links    ${dropLinks(tree)} symlinks removed`);
 
+  // The shared library nothing in the pruned tree links against. On macOS that
+  // is libpython3.11.dylib at 18 MB; on Linux it is libpython3.11.so.1.0 at
+  // 52.6 MB, with two symlinks beside it and a stub, libpython3.so, whose only
+  // purpose is to be linked by something embedding Python. The launcher does
+  // not embed it, it spawns bin/python3.11, and that binary is statically
+  // linked: its ELF dynamic section names libpthread, libdl, libutil, librt,
+  // libm and libc, and no libpython. Every extension module in lib-dynload was
+  // read the same way and none of them names it either.
   if (!flag("--keep-dylib") && !windows) {
-    for (const hit of expand(tree, "lib/libpython3.11.dylib")) {
-      rm(hit);
-      log(`dylib    removed ${path.relative(tree, hit)}, which nothing in the tree links against`);
+    const shared = macos
+      ? ["lib/libpython3.11.dylib"]
+      : ["lib/libpython3.11.so.1.0", "lib/libpython3.11.so", "lib/libpython3.so"];
+    for (const name of shared) {
+      for (const hit of expand(tree, name)) {
+        rm(hit);
+        log(`dylib    removed ${path.relative(tree, hit)}, which nothing in the tree links against`);
+      }
     }
   }
 
   const after = measure(tree);
   // Counted before the tree is moved into place, because it is counted in it.
-  const machO = windows ? 0 : machOCount(tree);
+  const machO = macos ? machOCount(tree) : 0;
 
   // Everything farm.py imports from the standard library, asked for by name.
   // A prune pattern that reaches one module too far is otherwise found at the
@@ -373,7 +412,7 @@ async function main() {
   log(`target   ${target}`);
   log(`runtime  CPython ${pins.python.version} (${pins.python.release}), ${version}`);
   log(`size     ${mb(before.bytes)} MB in ${before.files} files became ${mb(after.bytes)} MB in ${after.files} files`);
-  if (!windows) log(`mach-o   ${machO} files have to be signed before the app around them is`);
+  if (macos) log(`mach-o   ${machO} files have to be signed before the app around them is`);
   rm(work);
 }
 

@@ -61,6 +61,8 @@ const SITE = "https://tiinyapp.farm";
 const STABLE_MAC = "Tiiny-App-Farm.dmg";
 const STABLE_MAC_INTEL = "Tiiny-App-Farm-Intel.dmg";
 const STABLE_WINDOWS = "Tiiny-App-Farm-Setup.exe";
+const STABLE_LINUX = "Tiiny-App-Farm.AppImage";
+const HISTORY = "releases.json";
 
 const argv = process.argv.slice(2);
 const value = (name, fallback = null) => {
@@ -112,13 +114,14 @@ function runFor(workflow, override) {
 
 const macosRun = runFor("macos.yml", value("--macos-run"));
 const windowsRun = runFor("windows.yml", value("--windows-run"));
-log(`runs     macos ${macosRun}, windows ${windowsRun}`);
+const linuxRun = runFor("linux.yml", value("--linux-run"));
+log(`runs     macos ${macosRun}, windows ${windowsRun}, linux ${linuxRun}`);
 
 // --- Bring them down ------------------------------------------------------
 const work = keep ? path.resolve(keep) : fs.mkdtempSync(path.join(os.tmpdir(), "launcher-release-"));
 fs.mkdirSync(work, { recursive: true });
 log(`into     ${work}`);
-for (const id of [macosRun, windowsRun]) {
+for (const id of [macosRun, windowsRun, linuxRun]) {
   run("gh", ["run", "download", id, "--dir", work], { cwd: repoRoot, stdio: "inherit" });
 }
 
@@ -181,6 +184,9 @@ if (dmgs.length !== 2) die(`Expected two disk images, one per architecture, foun
 if (installers.length !== 1) die(`Expected one Windows installer, found ${installers.length}.`);
 if (tarballs.length !== 2) die(`Expected two updater bundles, found ${tarballs.length}.`);
 const installer = installers[0];
+const appImages = files.filter((f) => f.endsWith(".AppImage"));
+if (appImages.length !== 1) die(`Expected one Linux AppImage, found ${appImages.length}.`);
+const appImage = appImages[0];
 const arm = dmgs.find((f) => /aarch64|arm64/.test(path.basename(f)));
 const intel = dmgs.find((f) => f !== arm);
 if (!arm || !intel) die("Could not tell the two disk images apart by architecture.");
@@ -252,24 +258,132 @@ if (!windowsSigned) {
   log("         runs it. It is uploaded anyway, because an unsigned installer is better");
   log("         than no installer, but it is not what should stay up.");
 }
+// An AppImage is one ELF file that has to be executable to be anything. There
+// is no signature to check: Linux has no notary and nothing a stranger's
+// machine would check a desktop signature against, so the checksum published
+// beside it is what somebody can verify, and it goes in the release history.
+const elf = fs.readFileSync(appImage).subarray(0, 4);
+if (elf[0] !== 0x7f || elf.subarray(1, 4).toString("latin1") !== "ELF") {
+  die(`${path.basename(appImage)} is not an ELF executable.`);
+}
+log(`linux    ${path.basename(appImage)} sha256 ${vouched(appImage).slice(0, 16)} (UNSIGNED, which is what Linux has)`);
 for (const tarball of tarballs) log(`updater  ${path.basename(tarball)}`);
 
 // --- Put them where people download them ---------------------------------
-const versionedMac = (file) => flatten(path.basename(file));
+const versioned = (file) => flatten(path.basename(file));
+
+// What the release history will say about each file. The versioned name is the
+// one that goes in it, because a stable name is overwritten by the next release
+// and a history that points at stable names is a history of one release.
+const shipped = {
+  "mac-arm64": { file: arm, signed: true, notarised: true },
+  "mac-x64": { file: intel, signed: true, notarised: true },
+  "windows-x64": { file: installer, signed: windowsSigned, notarised: false },
+  "linux-x64": { file: appImage, signed: false, notarised: false },
+};
+
 const uploads = [
-  // Immutable, version in the name, what the feed points at.
-  { file: arm, key: `${PREFIX}${versionedMac(arm)}` },
-  { file: intel, key: `${PREFIX}${versionedMac(intel)}` },
-  { file: installer, key: `${PREFIX}${flatten(path.basename(installer))}` },
+  // Immutable, version in the name, what the feed and the history point at.
+  ...Object.values(shipped).map(({ file }) => ({ file, key: `${PREFIX}${versioned(file)}` })),
   ...tarballs.map((f) => ({ file: f, key: `${PREFIX}${path.basename(f)}` })),
   ...tarballs.map((f) => ({ file: `${f}.sig`, key: `${PREFIX}${path.basename(f)}.sig` })),
-  // Stable, no version, what the download button points at. Five minute cache.
+  // Stable, no version, what the download buttons point at. Five minute cache.
   { file: arm, key: `${PREFIX}${STABLE_MAC}` },
   { file: intel, key: `${PREFIX}${STABLE_MAC_INTEL}` },
   { file: installer, key: `${PREFIX}${STABLE_WINDOWS}` },
+  { file: appImage, key: `${PREFIX}${STABLE_LINUX}` },
   // Last, always.
   { file: feed, key: `${PREFIX}latest.json` },
 ];
+
+// --- The release history -------------------------------------------------
+// One object per release, newest first, so the site can offer every older
+// executable rather than only the newest. It is read from the bucket, added to,
+// and written back: an entry that is already there is never dropped, because
+// the only copy of what 0.1.0 shipped is the one in that file.
+
+// The entry's notes are the changelog, so there is one place where a release is
+// described and the download page reads it rather than repeating it.
+function notesFor(wanted) {
+  const changelog = fs.readFileSync(path.join(repoRoot, "CHANGELOG.md"), "utf8");
+  const headings = [...changelog.matchAll(/^## +(\d+\.\d+\.\d+)(?: +- +(\S+))?\s*$/gm)];
+  const at = headings.findIndex((found) => found[1] === wanted);
+  if (at === -1) return null;
+  const from = headings[at].index + headings[at][0].length;
+  const next = headings[at + 1];
+  return changelog.slice(from, next ? next.index : undefined).trim() || null;
+}
+
+function olderIsFirst(a, b) {
+  const parts = (v) => v.split(".").map((n) => Number.parseInt(n, 10) || 0);
+  const [x, y] = [parts(b.version), parts(a.version)];
+  for (let i = 0; i < 3; i += 1) if (x[i] !== y[i]) return x[i] - y[i];
+  return 0;
+}
+
+function history() {
+  // What the bucket already has. A missing file is the first publish since this
+  // existed, and then the seed is where the history starts.
+  let existing = null;
+  try {
+    const got = run("npx", ["wrangler", "r2", "object", "get", `${bucket}/${PREFIX}${HISTORY}`,
+      "--remote", "--pipe"], { cwd: farmDir, stdio: ["ignore", "pipe", "pipe"] });
+    existing = JSON.parse(got);
+    if (!Array.isArray(existing)) die(`${PREFIX}${HISTORY} in the bucket is not a list. Look at it before publishing over it.`);
+  } catch (error) {
+    // Only one failure is allowed to be quiet: the object is not there yet.
+    // Anything else, a network error, a permission problem, a half written
+    // file, must stop, because carrying on would replace every older release
+    // with a history that starts today.
+    const said = `${error.stderr || ""}${error.stdout || ""}${error.message || ""}`;
+    if (!/specified key does not exist/i.test(said)) {
+      die(
+        `Could not read ${PREFIX}${HISTORY} from the bucket, and it is not a missing file.\n` +
+        `Publishing now would drop every release already in it.\n  ${said.trim().split("\n").slice(-3).join("\n  ")}`,
+      );
+    }
+    existing = null;
+  }
+  if (!Array.isArray(existing)) {
+    const seed = path.join(repoRoot, "docs", "releases-seed.json");
+    existing = fs.existsSync(seed) ? JSON.parse(fs.readFileSync(seed, "utf8")) : [];
+    log(`history  nothing in the bucket yet, starting from ${existing.length} seeded entr${existing.length === 1 ? "y" : "ies"}`);
+  } else {
+    log(`history  ${existing.length} release${existing.length === 1 ? "" : "s"} already recorded`);
+  }
+
+  const mine = {
+    version,
+    date: new Date().toISOString().slice(0, 10),
+    commit: sha,
+    notes: notesFor(version),
+    files: Object.fromEntries(Object.entries(shipped).map(([key, { file, signed, notarised }]) => [key, {
+      name: versioned(file),
+      size: fs.statSync(file).size,
+      sha256: sha256(file),
+      signed,
+      notarised,
+    }])),
+  };
+
+  // Replace this version if it is already there, keep every other entry, and
+  // refresh the notes of the older ones from the changelog so one file remains
+  // the only place a release is described.
+  const kept = existing.filter((row) => row && row.version !== version);
+  for (const row of kept) {
+    const notes = notesFor(row.version);
+    if (notes) row.notes = notes;
+  }
+  const all = [mine, ...kept].sort(olderIsFirst);
+  log(`history  ${all.length} release${all.length === 1 ? "" : "s"} after this one: ${all.map((r) => r.version).join(", ")}`);
+  return all;
+}
+
+const releases = history();
+const historyFile = path.join(work, HISTORY);
+fs.writeFileSync(historyFile, JSON.stringify(releases, null, 2) + "\n");
+// Before latest.json, after everything it describes.
+uploads.splice(uploads.length - 1, 0, { file: historyFile, key: `${PREFIX}${HISTORY}` });
 
 if (publish) {
   const who = run("npx", ["wrangler", "whoami"], { cwd: farmDir });
@@ -296,12 +410,14 @@ for (const { file, key } of uploads) {
 const links = [
   `${SITE}/launcher/${STABLE_MAC}`,
   `${SITE}/launcher/${STABLE_WINDOWS}`,
+  `${SITE}/launcher/${STABLE_LINUX}`,
+  `${SITE}/launcher/${HISTORY}`,
   `${SITE}/launcher/latest.json`,
 ];
 log();
 if (!publish) {
   log("Nothing was uploaded. Add --publish to do it for real.");
-  log("These are the three links it would make:");
+  log("These are the links it would make:");
   for (const link of links) log(`  ${link}`);
 } else {
   log("Live now:");
@@ -323,7 +439,11 @@ log(JSON.stringify({
   mac: STABLE_MAC,
   macIntel: STABLE_MAC_INTEL,
   windows: STABLE_WINDOWS,
+  linux: STABLE_LINUX,
 }, null, 2));
+log();
+log(`The history for the older versions page is /launcher/${HISTORY}, newest first,`);
+log("one object per release with its notes and every file it shipped.");
 if (!windowsSigned) {
   log();
   log("Say somewhere on the page that the Windows installer is not signed yet, or the");
