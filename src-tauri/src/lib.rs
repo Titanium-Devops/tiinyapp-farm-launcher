@@ -267,14 +267,37 @@ async fn farm_doctor(app: tauri::AppHandle) -> Answer<Value> {
 /// met is how a window ends up disagreeing with the engine it is a face on.
 #[tauri::command]
 async fn farm_models(app: tauri::AppHandle, apps: Option<Vec<AppNeeds>>) -> Answer<Value> {
-    let before = app
-        .state::<Launcher>()
-        .snapshot_moved
-        .load(Ordering::SeqCst);
+    let before = snapshot_mark(&app);
     let answer = on_engine(app.clone(), |engine| {
         engine.json(&["models"], Budget::PATIENT)
     })
     .await?;
+    Ok(hold_and_decide(
+        &app,
+        answer,
+        before,
+        apps.unwrap_or_default(),
+    ))
+}
+
+/// Where the held snapshot was before a slow read of the device started.
+fn snapshot_mark(app: &tauri::AppHandle) -> u64 {
+    app.state::<Launcher>()
+        .snapshot_moved
+        .load(Ordering::SeqCst)
+}
+
+/// Take a whole-device answer, keep it, and say what it means for each app.
+///
+/// Every command that comes back with the full picture goes through here, so
+/// there is one place that decides whether the answer in hand is still the
+/// newest thing known and one shape for the window to read.
+fn hold_and_decide(
+    app: &tauri::AppHandle,
+    answer: Value,
+    before: u64,
+    apps: Vec<AppNeeds>,
+) -> Value {
     let mut snapshot = models::Snapshot::read(&answer);
     let launcher = app.state::<Launcher>();
     if let Ok(mut held) = launcher.snapshot.lock() {
@@ -287,10 +310,36 @@ async fn farm_models(app: tauri::AppHandle, apps: Option<Vec<AppNeeds>>) -> Answ
             snapshot = held.clone();
         }
     }
-    Ok(json!({
+    json!({
         "models": snapshot.clone().map(|held| json!(held)).unwrap_or(answer),
-        "needs": decide(apps.unwrap_or_default(), snapshot.as_ref()),
-    }))
+        "needs": decide(apps, snapshot.as_ref()),
+    })
+}
+
+/// Load one model onto the Tiiny, by name, because somebody pressed Load.
+///
+/// The engine answers with the whole device again, so the window does not have
+/// to wait for the watch to catch up with what it just asked for. Whether the
+/// model fits is the engine's rule and not a second one here: it refuses with
+/// its own sentence, and the pane keeps its own guard only so that a button
+/// that cannot work is never offered in the first place. Loading a model can
+/// take the device half a minute, so the budget is the long one.
+#[tauri::command]
+async fn farm_load_model(
+    app: tauri::AppHandle,
+    id: String,
+    apps: Option<Vec<AppNeeds>>,
+) -> Answer<Value> {
+    let before = snapshot_mark(&app);
+    let answer = on_engine(app.clone(), move |engine| {
+        engine.json(&["models", "--load", &id], Budget::DOWNLOAD)
+    })
+    .await?;
+    let decided = hold_and_decide(&app, answer, before, apps.unwrap_or_default());
+    // A model arriving changes what every app can do, and the menu bar says so
+    // for the ones that are running.
+    tray::refresh(&app);
+    Ok(decided)
 }
 
 /// The needs of every app, against the snapshot already held, with no call to
@@ -359,14 +408,6 @@ fn decide(apps: Vec<AppNeeds>, snapshot: Option<&models::Snapshot>) -> Value {
     }
     Value::Object(out)
 }
-
-// There is deliberately no command here for loading one named model. farm
-// 0.1.14 can load a model only as part of starting an app that needs it
-// (`farm start --load`), and the launcher will not reach past the engine to the
-// device to do it another way: one idea of what loading means, or the window
-// and the command line stop agreeing. The Models pane shows what is on disk and
-// what it would cost, and says why its Load button is not live yet. See
-// docs/LAUNCHER-2-REPORT.md.
 
 /// Start watching the device's models, or leave the watch that is already
 /// running alone.
@@ -909,6 +950,7 @@ pub fn run() {
             farm_doctor,
             farm_manifest,
             farm_models,
+            farm_load_model,
             app_needs,
             models_watch,
             device_find,
