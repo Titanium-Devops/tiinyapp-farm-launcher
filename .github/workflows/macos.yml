@@ -440,7 +440,7 @@ jobs:
             // The whole contents of the .sig file, which is what the updater
             // verifies against. A path or a URL in this field is refused.
             const signature = fs.readFileSync(sigfile, "utf8").trim();
-            // One flat filename, because that is all the farm's worker will
+            // One flat filename, because that is all the worker on the farm will
             // serve: launcherType() in worker/main.mjs refuses anything with a
             // slash in it before it ever looks in R2. The version is inside the
             // name, which is also what earns the object its one year cache.
