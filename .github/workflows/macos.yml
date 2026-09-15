@@ -431,16 +431,31 @@ jobs:
             // The whole contents of the .sig file, which is what the updater
             // verifies against. A path or a URL in this field is refused.
             const signature = fs.readFileSync(sigfile, "utf8").trim();
-            const url = `https://tiinyapp.farm/launcher/${version}/${name}`;
+            // One flat filename, because that is all the farm's worker will
+            // serve: launcherType() in worker/main.mjs refuses anything with a
+            // slash in it before it ever looks in R2. The version is inside the
+            // name, which is also what earns the object its one year cache.
+            const url = `https://tiinyapp.farm/launcher/${name}`;
             fs.writeFileSync(`${out}/${key}.json`, JSON.stringify({ version, key, signature, url }, null, 2) + "\n");
           ' "$OUT" "$NAME" "$VERSION" "$SIGFILE" "${{ matrix.feed_key }}"
           cat "$OUT/${{ matrix.feed_key }}.json"
+
+      # What the bytes are, written by the machine that made them, so whatever
+      # publishes them later can tell a truncated download from a real one.
+      - name: Record what the bytes are
+        run: |
+          set -eu
+          cd src-tauri/target/${{ matrix.target }}/release/bundle/dmg
+          shasum -a 256 *.dmg > SHA256SUMS
+          cat SHA256SUMS
 
       - name: Upload the disk image
         uses: actions/upload-artifact@v4
         with:
           name: tiinyapp-farm-launcher-macos-${{ matrix.arch }}-dmg
-          path: src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+          path: |
+            src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+            src-tauri/target/${{ matrix.target }}/release/bundle/dmg/SHA256SUMS
           if-no-files-found: error
 
       - name: Upload the updater bundle and the fragment

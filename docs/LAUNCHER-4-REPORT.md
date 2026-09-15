@@ -75,9 +75,37 @@ The Windows workflow will not upload an installer whose signature Windows itself
 called anything but Valid, so that check has already happened on a machine that
 could do it.
 
+Every installer goes up twice. The versioned name is what the updater feed
+points at and is immutable for a year; the stable name is what the site's
+download button points at, because `site/launcher.json` takes one bare filename
+per platform and that filename cannot change between releases.
+
+| What | Key | Cached |
+| --- | --- | --- |
+| Apple silicon, for the feed | `launcher/Tiiny-App-Farm_0.1.0_aarch64.dmg` | a year |
+| Apple silicon, for the button | `launcher/Tiiny-App-Farm.dmg` | five minutes |
+| Intel, for the feed | `launcher/Tiiny-App-Farm_0.1.0_x86_64.dmg` | a year |
+| Windows, for the button | `launcher/Tiiny-App-Farm-Setup.exe` | five minutes |
+| The feed | `launcher/latest.json` | never |
+
+The names the builds produce have spaces in them, which the worker's filename
+rule refuses, so the script renames on upload and never on disk.
+
+**One thing the site cannot express.** `launcher.json` has one `mac` filename
+and there are two disk images. The button gets the Apple silicon one. The Intel
+one is uploaded and reachable at `/launcher/Tiiny-App-Farm-Intel.dmg`, and
+nothing on the page links to it until the site can carry two names or the build
+produces one universal disk image.
+
 It needs `gh` logged in, and `wrangler` logged in to the account that owns the
-bucket. It reads no key, token or password from a file or an environment
-variable.
+bucket, which it checks with `wrangler whoami` from the farm's own checkout
+before the first upload. It reads no key, token or password from a file or an
+environment variable, and it prints none.
+
+Both workflows now write a `SHA256SUMS` beside what they built and upload it
+with the artifact, so the publish step has something the building machine
+vouched for to compare the downloaded bytes against. Before this there was
+nothing: no workflow logged a checksum anywhere.
 
 **Proved by running it.** Against `d4fc257`, the current tip of main, it found
 both runs, pulled the artifacts and stopped with:
@@ -90,23 +118,35 @@ both runs, pulled the artifacts and stopped with:
 Which is correct, and is what the first run tonight will say until the secrets
 are set.
 
-## 4. The thing that still blocks a download, and it is not here
+## 4. The route exists, and the feed was pointing at a shape it will not serve
 
-`macos.yml` writes every feed fragment with the download URL hardcoded to
-`https://tiinyapp.farm/launcher/<version>/<name>`.
+I read a 404 on `/launcher/latest.json` and called the route missing. It is not.
+The farm's worker has served that prefix since its pull request 29, and the 404
+is the route answering:
 
-| URL | Today |
-| --- | --- |
-| `https://tiinyapp.farm/` | 200 |
-| `https://tiinyapp.farm/seeds-files/<a real key>` | 200 |
-| `https://tiinyapp.farm/launcher/` | 404 |
-| `https://tiinyapp.farm/launcher/latest.json` | 404 |
+```
+$ curl -s https://tiinyapp.farm/launcher/latest.json
+{"error":"The launcher has not been published yet."}
+```
 
-So the worker serves R2 under `/seeds-files/`, and nothing serves `/launcher/`.
-Uploading to the bucket is necessary and not sufficient: somebody with the farm
-repository has to route `/launcher/*` to R2, or the URL in `macos.yml` has to
-change to a prefix that already works. That is a change in another repository
-and it is not made here.
+A missing route does not answer JSON in words. The status code alone was not
+evidence and I should have read the body before saying so.
+
+What is real, and worse, is what reading `worker/main.mjs` turned up.
+`launcherType()` accepts `^[A-Za-z0-9][A-Za-z0-9._-]*$` and nothing else, so a
+name with a slash in it is refused before the bucket is ever asked. The worker
+serves `GET /launcher/<file>` out of the key `launcher/<file>`, one flat name.
+
+`macos.yml` was writing every feed URL as
+`https://tiinyapp.farm/launcher/<version>/<name>`, which has a slash in it. Every
+one of those would have answered "That launcher file does not exist", and the
+updater would have been broken for everybody from the first release, quietly,
+because an updater that cannot fetch says nothing to the person using it.
+
+Fixed here: the fragment now writes `https://tiinyapp.farm/launcher/<name>`. The
+version is already inside the name, which is also what earns the object its one
+year cache in the worker. A name with no version in it gets five minutes, which
+is what the two stable download names want.
 
 ## 5. Checks, and what was not measured
 
@@ -127,8 +167,8 @@ the engine's own words and still exits non-zero.
 Not measured:
 
 - The upload half of `publish-release.mjs`. Everything up to the first
-  `wrangler r2 object put` ran for real; no object has been written to any
-  bucket, and no bucket name has been used.
+  `wrangler r2 object put` ran for real, against two real runs, and stopped
+  where it should. No object has been written to any bucket.
 - A signed or notarised build of any kind. None exists yet, on this Mac or in
   CI, because the Apple and Azure secrets are not set.
 - Windows, and an Intel Mac.
