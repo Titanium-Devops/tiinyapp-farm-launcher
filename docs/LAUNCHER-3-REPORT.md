@@ -6,7 +6,7 @@ PyPI, which is the engine side of MODELS-2.
 **Every number below was measured on one machine: a MacBook Pro, Apple M5 Max,
 macOS 26.6.2 (25G83), arm64, against Jason's Tiiny at 172.17.7.177.** Nothing
 here was measured on Windows or on any other machine. What was not measured is
-in section 8 and is labelled as such.
+in section 9 and is labelled as such.
 
 ---
 
@@ -107,7 +107,27 @@ which is why the device ended the run exactly as it started it.
 
 ---
 
-## 5. What was left alone, on purpose
+## 5. One bug the review found, and where it came from
+
+Moving the free-unit rule into Rust introduced one. `farm_models` and
+`farm_load_model` returned how much each model was short by; `app_needs`, which
+is the path every watch change takes, did not. The window read a field that was
+not there, emptied its map, and put a live Load button on every model the Tiiny
+had no room for. It would have shown up the first time a model changed while
+somebody had the pane open.
+
+The fix is not to add the field in the second place. Both paths now build their
+answer in one function, `answer_about`, so they cannot come back with different
+fields again.
+
+Checked on the built app rather than argued about. With the pane open and the
+shortfalls showing 15 and 23, a 2 unit model was loaded from outside the
+launcher so that the change arrived through the watch. The shortfalls became 17
+and 25 and the buttons stayed away. Before the fix they would have vanished.
+
+---
+
+## 6. What was left alone, on purpose
 
 **There is no Unload button.** The engine grew `farm models --unload <id>` in
 the same change, and it works: the operator side of this proof used it. It is
@@ -127,7 +147,7 @@ This was flagged to the team lead rather than decided quietly.
 
 ---
 
-## 6. The build in Jason's Applications folder
+## 7. The build in Jason's Applications folder
 
 `~/Applications/Tiiny App Farm.app` is the build of **main at `f301dd4`**, which
 is the merge of LAUNCHER-2. That is the build with the Models pane, the needs
@@ -140,7 +160,7 @@ never left in place at the end of a session.
 
 ---
 
-## 7. Checks
+## 8. Checks
 
 One thing that happened on this Mac is worth writing down, because it stops
 every build cold and looks like a broken repository rather than a licence.
@@ -168,7 +188,7 @@ stage, against the published release.
 
 ---
 
-## 8. Not measured
+## 9. Not measured
 
 - Windows. Nothing in this pull request was run on Windows.
 - An Intel Mac.

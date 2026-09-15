@@ -310,12 +310,30 @@ fn hold_and_decide(
             snapshot = held.clone();
         }
     }
+    answer_about(snapshot.as_ref(), apps, Some(answer))
+}
+
+/// One answer about the Tiiny, in the shape the window reads.
+///
+/// Every path that tells the window about the device comes through here, the
+/// slow full read and the watch alike, so the two can never come back with
+/// different fields. They did once: the watch path left out how much each model
+/// was short by, and the window, reading a field that was not there, put a live
+/// Load button on every model the Tiiny had no room for.
+fn answer_about(
+    snapshot: Option<&models::Snapshot>,
+    apps: Vec<AppNeeds>,
+    raw: Option<Value>,
+) -> Value {
     json!({
-        "models": snapshot.clone().map(|held| json!(held)).unwrap_or(answer),
+        "models": snapshot
+            .map(|held| json!(held))
+            .or(raw)
+            .unwrap_or(Value::Null),
         // What each downloaded model is short by, so the window can draw a
         // Load button without working out for itself what fits.
-        "shortBy": snapshot.as_ref().map(models::Snapshot::short_by).unwrap_or_default(),
-        "needs": decide(apps, snapshot.as_ref()),
+        "shortBy": snapshot.map(models::Snapshot::short_by).unwrap_or_default(),
+        "needs": decide(apps, snapshot),
     })
 }
 
@@ -355,10 +373,7 @@ fn app_needs(app: tauri::AppHandle, apps: Vec<AppNeeds>) -> Value {
         .lock()
         .ok()
         .and_then(|held| held.clone());
-    json!({
-        "models": held,
-        "needs": decide(apps, held.as_ref()),
-    })
+    answer_about(held.as_ref(), apps, None)
 }
 
 /// What one app declares it needs, as the window read it off the manifest.
