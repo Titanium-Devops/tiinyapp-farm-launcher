@@ -1,6 +1,6 @@
 {
   "comment": "Everything the launcher carries inside itself, pinned. Change a number here and scripts/stage-runtime.mjs fetches something else; nothing else in the repository names a version.",
-  "farm": "0.1.15",
+  "farm": "0.1.16",
   "python": {
     "release": "20260901",
     "version": "3.11.16",

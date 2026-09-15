@@ -5,8 +5,8 @@ than by screen region, so nothing else that happened to be on the screen is in
 them. Taken on a MacBook Pro (Apple M5 Max, macOS 26.6.2) on 2026-09-14 from the
 ad hoc signed 0.1.0 build against Jason's Tiiny at 172.17.7.177, with the engine
 pointed at a scratch home so nothing of his was touched. Pictures 01 to 15 were
-taken against engine farm 0.1.13, 16 to 23 against farm 0.1.14, and 24 to 27 against
-farm 0.1.15 from PyPI.
+taken against engine farm 0.1.13, 16 to 23 against farm 0.1.14, 24 to 27 against farm 0.1.15
+from PyPI, and 28 against farm 0.1.16.
 
 The window is 1100 by 720 points in all of them except `10-smallest-size.png`
 and `12-smallest-first-run.png`, which are the smallest size the launcher
@@ -42,6 +42,7 @@ bar menu rather than the window.
 | `25-models-after-a-load.png` | The same list a minute later, after Load was pressed on the 4 unit OCR model. It has gone from the list because it is loaded now, and every shortfall underneath it has grown by four: `openai/gpt-oss-20b` had a live button at exactly 32 units and now says it is 4 short. Nothing was typed to make that happen. |
 | `26-npu-after-a-load.png` | The budget at the top of the same pane, 28 of 100 free, with the bar moved to match. |
 | `27-load-and-start.png` | Load and start on an app whose chat model was not loaded. The farm loaded one and then started the app, and the window says which one: Daybreak is running on port 8811, and it loaded Qwen/Qwen3-8B on the Tiiny first. |
+| `28-usual-port.png` | Daybreak's card while it is running on a port its manifest does not ask for. The needs line says the 8811 it asks for; the line under it says it usually comes up on 8813, because that is where it ran last. Made by starting it with --port 8813 so the two numbers really disagreed. When they agree the second line is not drawn. |
 
 Three serials are blacked out, in `01`, `11` and `12`. They identify one person's
 device, they are not something the launcher handles, and they do not need to

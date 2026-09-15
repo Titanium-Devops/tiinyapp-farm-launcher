@@ -322,6 +322,7 @@ function renderCardState() {
     actions.append(el("span", { class: "chip", text: working.line }));
     return;
   }
+  renderCardPort(id);
   renderCardModels(id);
 
   if (!installedRow) {
@@ -354,6 +355,29 @@ function renderCardState() {
       document.createTextNode(`Update to ${installedRow.updateAvailable}`)));
   }
   actions.append(el("button", { class: "btn quiet", type: "button", onclick: () => remove(id) }, document.createTextNode("Remove")));
+}
+
+// Where this app actually comes up.
+//
+// Since farm 0.1.16 the engine remembers the port an app last took and tries
+// that one first, because an app's origin is its port and moving it throws away
+// the logins and the local storage a browser kept for it. So the number in the
+// manifest is what it asks for, and this is where it really is. Saying both
+// only helps when they differ; when they agree the needs sentence has already
+// said it.
+function renderCardPort(id) {
+  const line = $("card-port");
+  const live = farm.running.find((row) => row.id === id);
+  const usual = live && live.usualPort;
+  const asked = ((farm.manifests.get(id) || {}).requires || {}).ports || [];
+  if (!usual || asked.includes(usual)) {
+    line.hidden = true;
+    return;
+  }
+  line.hidden = false;
+  line.textContent = asked.length
+    ? `It usually comes up on port ${usual} rather than the ${asked[0]} it asks for, because that is where it ran last.`
+    : `It usually comes up on port ${usual}, because that is where it ran last.`;
 }
 
 // What one app needs, drawn from the decision Rust made.
