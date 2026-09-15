@@ -14,6 +14,7 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::BTreeMap;
 use std::sync::Mutex;
 
 /// One model, loaded or only downloaded.
@@ -108,6 +109,31 @@ impl Snapshot {
                 _ => true,
             })
             .min_by_key(|row| (row.units.unwrap_or(0), row.id.clone()))
+    }
+
+    /// How many NPU units each downloaded model is short by, for the ones that
+    /// will not fit in what is free. A model that can be loaded now is not in
+    /// here at all.
+    ///
+    /// This is the engine's rule, the one `load_one` refuses on, written once.
+    /// The window draws its Load buttons from this map rather than doing the
+    /// arithmetic again, because two copies of a rule are two things that can
+    /// disagree with the engine and only one of them is on screen.
+    pub fn short_by(&self) -> BTreeMap<String, i64> {
+        let Some(free) = self.npu.available else {
+            // A device that does not say what is free is not a device that
+            // says no. Offering the button and letting the engine refuse is
+            // better than refusing on a number nobody has.
+            return BTreeMap::new();
+        };
+        self.downloaded
+            .iter()
+            .filter_map(|row| {
+                row.units
+                    .filter(|units| *units > free)
+                    .map(|units| (row.id.clone(), units - free))
+            })
+            .collect()
     }
 
     /// Everything of this kind on disk, whether or not it fits, so the window
@@ -762,5 +788,58 @@ mod tests {
         assert_eq!(row.id, "Qwen/Qwen3-8B");
         assert_eq!(row.units, Some(28));
         assert_eq!(row.state.as_deref(), Some("loading"));
+    }
+
+    #[test]
+    fn a_model_that_fits_is_not_short_of_anything() {
+        let state = tiiny();
+        assert_eq!(state.npu.available, Some(32));
+        let short = state.short_by();
+        // 32 units free, and this one costs exactly that. Exactly fitting fits.
+        assert!(!short.contains_key("openai/gpt-oss-20b"));
+        assert!(!short.contains_key("FireRedTeam/Firered-ASR2-LLM"));
+    }
+
+    #[test]
+    fn a_model_too_big_says_how_much_too_big() {
+        let short = tiiny().short_by();
+        assert_eq!(short.get("Qwen/Qwen3-30B-A3B-Instruct"), Some(&23));
+        assert_eq!(short.len(), 1);
+    }
+
+    #[test]
+    fn loading_something_makes_what_is_left_short_of_more() {
+        // The pane's whole trick: a load takes units away and the rows under
+        // it say so without anybody asking the device again.
+        let mut state = tiiny();
+        let line = r#"{"command":"models","event":"loaded","id":"FireRedTeam/Firered-ASR2-LLM","kind":"asr","units":6,"state":"running","npu":{"total":100,"used":74,"available":26}}"#;
+        let Some(Watched::Changed(change)) = read_watch_line(line) else {
+            panic!()
+        };
+        apply(&mut state, &change);
+        let short = state.short_by();
+        assert_eq!(short.get("Qwen/Qwen3-30B-A3B-Instruct"), Some(&29));
+        // And one that fitted exactly now does not.
+        assert_eq!(short.get("openai/gpt-oss-20b"), Some(&6));
+    }
+
+    #[test]
+    fn a_model_whose_cost_the_device_does_not_report_is_never_called_too_big() {
+        let mut state = tiiny();
+        state.downloaded.push(Model {
+            id: "someone/mystery".into(),
+            kind: Some("chat".into()),
+            capability: None,
+            units: None,
+            state: None,
+        });
+        assert!(!state.short_by().contains_key("someone/mystery"));
+    }
+
+    #[test]
+    fn a_device_that_does_not_say_what_is_free_calls_nothing_too_big() {
+        let mut state = tiiny();
+        state.npu.available = None;
+        assert!(state.short_by().is_empty());
     }
 }

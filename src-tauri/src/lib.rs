@@ -312,6 +312,9 @@ fn hold_and_decide(
     }
     json!({
         "models": snapshot.clone().map(|held| json!(held)).unwrap_or(answer),
+        // What each downloaded model is short by, so the window can draw a
+        // Load button without working out for itself what fits.
+        "shortBy": snapshot.as_ref().map(models::Snapshot::short_by).unwrap_or_default(),
         "needs": decide(apps, snapshot.as_ref()),
     })
 }

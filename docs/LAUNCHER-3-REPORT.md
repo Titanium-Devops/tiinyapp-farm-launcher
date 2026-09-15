@@ -22,9 +22,13 @@ is fixed in the engine, and this is the window catching up.
 | A model too big for the free units had a disabled button like all the others | It has no button at all, and says how much more it needs |
 | Load and start ran, failed, and explained that the engine could not do it | Load and start loads a model and then starts the app, and says which model it loaded |
 
-The pane's own guard is only about not offering a button that cannot work.
 Whether a model fits is the engine's rule, in `load_one`, and it refuses in its
-own words if anything ever gets past the window.
+own words if anything ever gets past the window. The window does not work it out
+a second time: `Snapshot::short_by` in `src-tauri/src/models.rs` says how much
+each downloaded model is short by, the pane reads that map, and five tests pin
+it, including the two edges that matter. A model that costs exactly what is free
+fits, and a model whose cost the device does not report is never called too big,
+because refusing on a number nobody has would be worse than trying.
 
 ---
 
@@ -133,9 +137,19 @@ never left in place at the end of a session.
 
 ## 7. Checks
 
+One thing on this Mac is worth writing down, because it stops every build cold
+and it is not a code problem. Xcode 27.0 became the selected toolchain partway
+through this work and its licence has not been accepted, so `cc`, `cargo` and
+`/usr/bin/git` all fail with "You have not agreed to the Xcode license
+agreements". Accepting it needs `sudo xcodebuild -license accept`, which is the
+machine owner's to run. Everything below was built and run with
+`DEVELOPER_DIR=/Library/Developer/CommandLineTools`, which points each process
+at the Command Line Tools that are already installed and changes nothing on the
+machine.
+
 | Check | Result |
 | --- | --- |
-| `cargo test` | 79 passed, 0 failed |
+| `cargo test` | 84 passed, 0 failed |
 | `cargo clippy --all-targets -- -D warnings` | clean |
 | `cargo fmt --check` | clean |
 | `npm run tauri build` | app and dmg built, ad hoc signed |

@@ -32,6 +32,7 @@ const farm = {
   needs: {},             // id -> what that means for one app, decided in Rust
   modelsTrouble: null,   // what the watch said when it could not look
   loading: new Set(),    // model ids the Tiiny is being asked to load
+  shortBy: {},           // model id -> NPU units it is short by, decided in Rust
   trouble: new Map(), // id -> { message, commentary }
   open: null,
 };
@@ -686,6 +687,7 @@ async function readModels(fromWatch) {
       ? await invoke("app_needs", { apps: appNeedsList() })
       : await invoke("farm_models", { apps: appNeedsList() });
     farm.device_models = answer.models;
+    farm.shortBy = answer.shortBy || {};
     farm.needs = answer.needs || {};
     farm.modelsTrouble = null;
     // A refusal about a missing model is not true any more once the model is
@@ -719,17 +721,12 @@ function units(n) {
   return n === 1 ? "1 NPU unit" : `${n} NPU units`;
 }
 
-function modelRow(row, loaded, free) {
+function modelRow(row, loaded) {
   // A model that costs more than the Tiiny has left cannot be loaded, so the
-  // row says how much it is short by and the button is not offered at all.
-  // The rule is the engine's, in load_one, and `Snapshot::would_load_within`
-  // in src-tauri/src/models.rs is where it is written down and tested. A cost
-  // the device does not report counts as fitting, in all three places, because
-  // refusing to try would be worse than trying.
-  const short = !loaded && row.units !== null && row.units !== undefined
-    && free !== null && free !== undefined && row.units > free
-    ? row.units - free
-    : 0;
+  // row says how much it is short by and no button is offered at all. How much
+  // is Rust's answer, from `Snapshot::short_by`, which is the engine's rule
+  // written once. Nothing here works it out.
+  const short = loaded ? 0 : (farm.shortBy[row.id] || 0);
   const busy = farm.loading.has(row.id);
   const facts = el("div", { class: "m" },
     el("span", { text: row.kind || row.capability || "kind unknown" }),
@@ -778,7 +775,7 @@ function renderModels() {
   $("models-disk-note").textContent = disk.length
     ? "These are downloaded and cost nothing until they are loaded. Loading one takes NPU units away from what is free, and anything that does not fit says so instead of offering a button."
     : "Nothing else is downloaded. TiinyOS is where a model is downloaded.";
-  for (const row of disk) diskBox.append(modelRow(row, false, npu.available));
+  for (const row of disk) diskBox.append(modelRow(row, false));
 }
 
 // Loading one model, because somebody pressed Load on its row. Nothing here
@@ -793,6 +790,7 @@ async function loadModel(row) {
     // looks. The watch still says so a second later and nothing changes twice.
     const answer = await invoke("farm_load_model", { id: row.id, apps: appNeedsList() });
     farm.device_models = answer.models;
+    farm.shortBy = answer.shortBy || {};
     farm.needs = answer.needs || {};
     farm.modelsTrouble = null;
     for (const [id, bad] of [...farm.trouble]) {
