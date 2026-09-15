@@ -1,5 +1,4 @@
 {
-  "comment": "Laid over tauri.conf.json only on a run that has the updater signing key. createUpdaterArtifacts is off in the checked in config because turning it on without a key fails the build, and a build that fails for a secret nobody has set yet tells you nothing.",
   "bundle": {
     "createUpdaterArtifacts": true
   }

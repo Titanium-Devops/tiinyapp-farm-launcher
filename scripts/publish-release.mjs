@@ -225,7 +225,33 @@ for (const dmg of dmgs) {
 
 const head = fs.readFileSync(installer).subarray(0, 2).toString("latin1");
 if (head !== "MZ") die(`${path.basename(installer)} is not a Windows executable.`);
-log(`windows  ${path.basename(installer)} sha256 ${vouched(installer).slice(0, 16)} (Authenticode called Valid by the workflow, which is the only thing that can)`);
+
+// Whether that run signed the installer is not a guess: the workflow's Verify
+// signature step only runs when it did, so a skipped step is an unsigned
+// installer. Windows is the only thing that can check an Authenticode
+// signature, so what is checked here either way is that the bytes are the ones
+// the runner hashed.
+let windowsSigned = false;
+try {
+  const steps = JSON.parse(
+    run("gh", ["run", "view", windowsRun, "--json", "jobs"], { cwd: repoRoot }),
+  ).jobs.flatMap((job) => job.steps || []);
+  const verify = steps.find((step) => step.name === "Verify signature");
+  windowsSigned = Boolean(verify) && verify.conclusion === "success";
+} catch {
+  // Asked and could not be told. Treated as unsigned, which is the answer that
+  // makes somebody look rather than the one that lets it through quietly.
+  windowsSigned = false;
+}
+const windowsWord = windowsSigned ? "Authenticode Valid" : "UNSIGNED";
+log(`windows  ${path.basename(installer)} sha256 ${vouched(installer).slice(0, 16)} (${windowsWord})`);
+if (!windowsSigned) {
+  log("");
+  log("         The Windows installer is UNSIGNED. AZURE_CLIENT_ID is not set, so that run");
+  log("         built it without an Authenticode signature. Windows will warn anybody who");
+  log("         runs it. It is uploaded anyway, because an unsigned installer is better");
+  log("         than no installer, but it is not what should stay up.");
+}
 for (const tarball of tarballs) log(`updater  ${path.basename(tarball)}`);
 
 // --- Put them where people download them ---------------------------------
@@ -291,8 +317,15 @@ if (!publish) {
 
 log();
 log("site/launcher.json, for the farm repository:");
-log(JSON.stringify({ enabled: true, version, mac: STABLE_MAC, windows: STABLE_WINDOWS }, null, 2));
-log();
-log(`The site takes one filename per platform, so the Mac button is the Apple silicon`);
-log(`disk image. The Intel one is uploaded and reachable at /launcher/${STABLE_MAC_INTEL},`);
-log(`but nothing on the page links to it until the site can carry two.`);
+log(JSON.stringify({
+  enabled: true,
+  version,
+  mac: STABLE_MAC,
+  macIntel: STABLE_MAC_INTEL,
+  windows: STABLE_WINDOWS,
+}, null, 2));
+if (!windowsSigned) {
+  log();
+  log("Say somewhere on the page that the Windows installer is not signed yet, or the");
+  log("first thing a stranger sees is a warning nobody told them to expect.");
+}
