@@ -37,12 +37,13 @@ with `--port` so the two numbers really disagreed, then opening its card.
 When the two agree the line is not drawn at all. The needs sentence has already
 said the number, and a second line repeating it is noise.
 
-**One limit, and it is the engine's.** `usualPort` reaches the launcher only on
-the rows of `farm status --json`, which lists running apps. `farm list --json`
-does not carry it, and there is no per-app command that answers for a stopped
-one. So the line appears for an app that is running and not for one that is
-stopped, which is the opposite of when somebody would most like to know. Fixing
-that is one field on the `list` rows in the engine, not work in this window.
+**The limit this had, and how it went.** Against farm 0.1.16 `usualPort` reached
+the launcher only on the rows of `farm status --json`, which lists running apps,
+so the line appeared for a running app and not for a stopped one, which is the
+opposite of when somebody would like to know. farm 0.1.17 puts the field on
+every installed row, and the window now reads it from there, preferring the
+running row when there is one. The picture in `docs/shots/28-usual-port.png` is
+a stopped app.
 
 ## 3. A way to get a signed build to people
 

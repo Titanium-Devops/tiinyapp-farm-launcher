@@ -359,16 +359,20 @@ function renderCardState() {
 
 // Where this app actually comes up.
 //
-// Since farm 0.1.16 the engine remembers the port an app last took and tries
-// that one first, because an app's origin is its port and moving it throws away
-// the logins and the local storage a browser kept for it. So the number in the
-// manifest is what it asks for, and this is where it really is. Saying both
-// only helps when they differ; when they agree the needs sentence has already
-// said it.
+// The engine remembers the port an app last took and tries that one first,
+// because an app's origin is its port and moving it throws away the logins and
+// the local storage a browser kept for it. So the number in the manifest is
+// what it asks for, and this is where it really comes up. Saying both only
+// helps when they differ; when they agree the needs sentence has already said
+// it.
 function renderCardPort(id) {
   const line = $("card-port");
+  // Since farm 0.1.17 every installed row carries this, running or not, which
+  // is the case that matters: the question "where will this come up?" is one
+  // somebody asks before they press Start, not after.
   const live = farm.running.find((row) => row.id === id);
-  const usual = live && live.usualPort;
+  const listed = farm.installed.find((row) => row.id === id);
+  const usual = (live && live.usualPort) || (listed && listed.usualPort) || null;
   const asked = ((farm.manifests.get(id) || {}).requires || {}).ports || [];
   if (!usual || asked.includes(usual)) {
     line.hidden = true;
