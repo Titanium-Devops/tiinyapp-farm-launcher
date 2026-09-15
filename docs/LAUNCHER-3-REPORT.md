@@ -137,15 +137,16 @@ never left in place at the end of a session.
 
 ## 7. Checks
 
-One thing on this Mac is worth writing down, because it stops every build cold
-and it is not a code problem. Xcode 27.0 became the selected toolchain partway
-through this work and its licence has not been accepted, so `cc`, `cargo` and
-`/usr/bin/git` all fail with "You have not agreed to the Xcode license
-agreements". Accepting it needs `sudo xcodebuild -license accept`, which is the
-machine owner's to run. Everything below was built and run with
-`DEVELOPER_DIR=/Library/Developer/CommandLineTools`, which points each process
-at the Command Line Tools that are already installed and changes nothing on the
-machine.
+One thing that happened on this Mac is worth writing down, because it stops
+every build cold and looks like a broken repository rather than a licence.
+Xcode 27.0 became the selected toolchain partway through this work and its
+licence had not been accepted, so `cc`, `cargo` and `/usr/bin/git` all failed
+with "You have not agreed to the Xcode license agreements". Work carried on with
+`DEVELOPER_DIR=/Library/Developer/CommandLineTools`, which points one process at
+the Command Line Tools that are already installed and changes nothing on the
+machine. Jason accepted the licence at 19:11 CDT, and **every check in the table
+below was then run again on the plain toolchain, with no `DEVELOPER_DIR` set,
+so these are the numbers a fresh Mac gives.**
 
 | Check | Result |
 | --- | --- |
