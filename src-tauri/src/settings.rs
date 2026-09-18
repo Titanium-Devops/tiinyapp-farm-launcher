@@ -1,6 +1,7 @@
 //! The launcher's own settings. Small, and none of them are secrets: the
 //! device key lives in the engine's device file at mode 0600 and never here.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -23,6 +24,12 @@ pub struct Settings {
     /// who would rather have their own extensions and their own history turns
     /// this on, and Open in browser is on every row either way.
     pub open_in_browser: bool,
+    /// Every app id this launcher has already put on a screen, against the
+    /// version it was first shown at. `None` means it has never drawn the farm
+    /// at all, which is a different thing from having drawn it and found
+    /// nothing: the first screen marks everything seen without a word, so that
+    /// nobody's first look at the farm is a wall of New badges.
+    pub seen: Option<BTreeMap<String, String>>,
 }
 
 impl Settings {
@@ -58,6 +65,7 @@ mod tests {
         assert!(!settings.farm_on_path);
         assert!(!settings.open_in_browser);
         assert_eq!(settings.manual_base, None);
+        assert_eq!(settings.seen, None);
     }
 
     #[test]
@@ -80,6 +88,7 @@ mod tests {
             farm_on_path: false,
             manual_base: Some("http://172.17.7.177/v1".into()),
             open_in_browser: true,
+            seen: Some(BTreeMap::from([("story-lantern".into(), "0.1.3".into())])),
         };
         settings.write(&dir).unwrap();
         assert_eq!(Settings::read(&dir), settings);
@@ -95,6 +104,9 @@ mod tests {
         let settings = Settings::read(&dir);
         assert!(settings.autostart);
         assert!(!settings.farm_on_path);
+        // A launcher that has been run before this field existed has still
+        // shown somebody the farm, so nothing on it is New.
+        assert_eq!(settings.seen, None);
         std::fs::remove_dir_all(&dir).ok();
     }
 }

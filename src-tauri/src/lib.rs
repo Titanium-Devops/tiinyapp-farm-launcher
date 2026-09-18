@@ -5,6 +5,7 @@
 //! and this draws the answer.
 
 pub mod appwindow;
+pub mod badges;
 pub mod catalog;
 pub mod engine;
 pub mod models;
@@ -14,6 +15,7 @@ pub mod state;
 pub mod tray;
 pub mod trouble;
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -22,6 +24,7 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
+use badges::{CardRow, Mark};
 use engine::{Budget, Engine, EngineError};
 use settings::Settings;
 
@@ -655,6 +658,71 @@ async fn device_save(app: tauri::AppHandle, base: String, key: String) -> Answer
     Ok(state)
 }
 
+/// What every card on the farm screen puts in its corners: the version waiting
+/// for an app that is planted and behind, and New on an app this launcher has
+/// never drawn before.
+///
+/// The seen map is written here, on the first run only, so that somebody
+/// opening the launcher for the first time is not handed a wall of New. After
+/// that, looking at the screen changes nothing; opening a card does.
+#[tauri::command]
+fn catalog_marks(app: tauri::AppHandle, rows: Vec<CardRow>) -> BTreeMap<String, Mark> {
+    let launcher = app.state::<Launcher>();
+    let held = launcher
+        .settings
+        .lock()
+        .map(|s| s.clone())
+        .unwrap_or_default();
+    let (marks, write) = badges::marks(&rows, held.seen.as_ref());
+    if let Some(seen) = write {
+        let next = Settings {
+            seen: Some(seen),
+            ..held
+        };
+        // A seen map that could not be saved means New comes back next time,
+        // which is a small wrong thing. Failing to draw the farm over it would
+        // be a large one.
+        if next.write(&launcher.engine.config_dir()).is_ok() {
+            if let Ok(mut current) = launcher.settings.lock() {
+                *current = next;
+            }
+        }
+    }
+    marks
+}
+
+/// Somebody opened this card, so it is not New any more.
+#[tauri::command]
+fn card_seen(app: tauri::AppHandle, id: String, version: Option<String>) -> Result<(), String> {
+    let launcher = app.state::<Launcher>();
+    let held = launcher
+        .settings
+        .lock()
+        .map(|s| s.clone())
+        .unwrap_or_default();
+    let seen = badges::opened(held.seen.as_ref(), &id, version.as_deref());
+    if held.seen.as_ref() == Some(&seen) {
+        return Ok(());
+    }
+    let next = Settings {
+        seen: Some(seen),
+        ..held
+    };
+    next.write(&launcher.engine.config_dir())?;
+    if let Ok(mut current) = launcher.settings.lock() {
+        *current = next;
+    }
+    Ok(())
+}
+
+/// How many seeds each app on the screen has been given, and the pile that
+/// draws. Read from the farm rather than from the engine, and never waited on:
+/// the cards are already up by the time this answers.
+#[tauri::command]
+async fn social_counts(ids: Vec<String>) -> BTreeMap<String, catalog::Social> {
+    catalog::social_counts(&ids).await
+}
+
 #[tauri::command]
 fn settings_read(app: tauri::State<'_, Launcher>) -> Settings {
     app.settings.lock().map(|s| s.clone()).unwrap_or_default()
@@ -983,6 +1051,9 @@ pub fn run() {
             device_save,
             settings_read,
             settings_write,
+            catalog_marks,
+            card_seen,
+            social_counts,
             take_deep_link,
             open_external,
             open_app,

@@ -7,6 +7,32 @@ the diff.
 
 This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.1.2 - 2026-09-18
+
+### Added
+
+- **Update available, on the card.** An app you have planted that the catalog
+  has moved past says so in the top right corner of its card, over the art,
+  rather than only inside the card. Opening it still shows the same Update
+  button that was always there.
+- **New, on the card.** An app this launcher has never put on your screen
+  before carries a New badge in its top left corner until you open it. The
+  first run of a new install marks the whole farm seen without a word, so
+  nobody's first look is a wall of badges, and an app you have already met does
+  not become New again when it publishes a new version.
+- **A stack of seeds.** Every card says how many seeds the farm has given that
+  app, as a little pile beside the Planted chip that grows with the count: an
+  outline where nobody has given one yet, then the seeds themselves, and from
+  ten up a full pile with the number. It is read once per look at the farm and
+  never holds the cards back.
+
+### Known limits
+
+- The seed count is read only. Giving an app a seed is still something you do
+  on tiinyapp.farm; a later version brings it into the window.
+- The count comes from the farm, so a launcher with no network draws the cards
+  with no piles on them rather than waiting.
+
 ## 0.1.1 - 2026-09-15
 
 ### Added
