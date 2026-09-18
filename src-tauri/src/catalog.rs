@@ -212,11 +212,13 @@ fn is_app_id(id: &str) -> bool {
 
 /// Seeds and comments for a screen of apps.
 ///
-/// One request for the lot where the farm answers it, and one request per app
-/// where it does not, because the batch route is newer than some of the copies
-/// of the launcher that will ask for it. Nothing here is allowed to fail
-/// loudly: a card with no pile on it is a card, and a card that would not draw
-/// because a count did not arrive is not.
+/// One request for the lot, which is what the farm answers today, and one
+/// request per app where it does not. The per-app route is older than the batch
+/// one and is kept as the way back: a launcher lives on somebody's machine for
+/// months and can outlive a route, and it was the only route at all earlier on
+/// the day this was written. Nothing here is allowed to fail loudly: a card
+/// with no pile on it is a card, and a card that would not draw because a count
+/// did not arrive is not.
 pub async fn social_counts(ids: &[String]) -> BTreeMap<String, Social> {
     let wanted: Vec<String> = ids.iter().filter(|id| is_app_id(id)).cloned().collect();
     if wanted.is_empty() {

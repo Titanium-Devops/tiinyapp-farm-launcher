@@ -114,9 +114,19 @@ function seedStack(social) {
       pile.append(row);
     }
   }
+  // At zero the husk on its own is almost invisible against the art, and on a
+  // farm where nearly everything is at zero today that reads as a rendering
+  // fault rather than as an answer. So the words go beside it, in the same
+  // muted grey the chips use. From one seed up the pile speaks for itself, and
+  // from ten the number takes over.
+  const said = shape.kind === "none"
+    ? el("b", { class: "none", text: shape.words })
+    : shape.number === null || shape.number === undefined
+      ? null
+      : el("b", { text: String(shape.number) });
   return el("span", { class: `seeds ${shape.kind}`, role: "img", "aria-label": shape.words, title: shape.words },
     pile,
-    shape.number === null || shape.number === undefined ? null : el("b", { text: String(shape.number) }));
+    said);
 }
 
 function art(manifest, which) {
