@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "about",
+  "description": "What the About window is allowed to ask the app for. It reads one thing and opens links, and every address it can open is the exact list in src-tauri/src/about.rs. It has no updater permission of its own: the check it offers goes through the launcher's own command, which is the same look the four hour loop makes.",
+  "windows": ["about"],
+  "permissions": ["core:default", "opener:default"]
+}
