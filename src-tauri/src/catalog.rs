@@ -2,9 +2,11 @@
 //! how many seeds each app has been given, and whether a Tiiny is where
 //! somebody said it is.
 //!
-//! Both are read from Rust rather than from the page. A web view asking for
-//! them would be a second HTTP client with a different idea of timeouts, and
-//! the device probe has to accept a 401 as a yes, which is easier to say here.
+//! All three are read from Rust rather than from the page. A web view asking
+//! for them would be a second HTTP client with a different idea of timeouts,
+//! the device probe has to accept a 401 as a yes, which is easier to say here,
+//! and the page has no network origin of its own to ask with: the content
+//! policy on this app allows `ipc:` and nothing else.
 
 use std::collections::BTreeMap;
 use std::time::Duration;
