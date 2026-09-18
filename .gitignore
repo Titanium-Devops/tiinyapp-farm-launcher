@@ -5,3 +5,6 @@ src-tauri/gen/
 docs/shots/*.tmp.png
 .DS_Store
 build/
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+/graft/

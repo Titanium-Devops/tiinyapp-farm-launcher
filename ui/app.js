@@ -33,6 +33,8 @@ const farm = {
   modelsTrouble: null,   // what the watch said when it could not look
   loading: new Set(),    // model ids the Tiiny is being asked to load
   shortBy: {},           // model id -> NPU units it is short by, decided in Rust
+  marks: {},             // id -> { update, fresh }, the two corners, decided in Rust
+  social: {},            // id -> { seeds, comments, stack }, the pile, decided in Rust
   trouble: new Map(), // id -> { message, commentary }
   open: null,
 };
@@ -93,6 +95,29 @@ function badge(row, manifest) {
   return null;
 }
 
+// The pile of seeds in a card's footer -----------------------------------
+//
+// The shape is decided in Rust, the same rules the site draws with, so a card
+// here and a card in a browser are the same card. This only puts the seeds
+// where the shape says, bottom row first, so the pile builds upward.
+function seedStack(social) {
+  if (!social || !social.stack) return null;
+  const shape = social.stack;
+  const pile = el("span", { class: "pile" });
+  if (shape.kind === "none") {
+    pile.append(el("span", { class: "srow" }, el("i", { class: "seed hollow" })));
+  } else {
+    for (const many of [...shape.rows].reverse()) {
+      const row = el("span", { class: "srow" });
+      for (let at = 0; at < many; at += 1) row.append(el("i", { class: "seed" }));
+      pile.append(row);
+    }
+  }
+  return el("span", { class: `seeds ${shape.kind}`, role: "img", "aria-label": shape.words, title: shape.words },
+    pile,
+    shape.number === null || shape.number === undefined ? null : el("b", { text: String(shape.number) }));
+}
+
 function art(manifest, which) {
   const path = manifest && manifest.media ? manifest.media[which] : null;
   if (!path) return null;
@@ -108,12 +133,19 @@ function renderCatalog() {
   grid.hidden = rows.length === 0;
   for (const row of rows) {
     const manifest = farm.manifests.get(row.id);
-    const mark = badge(row, manifest);
+    let mark = badge(row, manifest);
+    const flags = farm.marks[row.id] || {};
+    // The card already says New in its own corner, in this launcher's sense of
+    // the word. Saying it twice on one card, for two different reasons, would
+    // only make somebody wonder which of them they were reading.
+    if (flags.fresh && mark && mark.text === "New") mark = null;
     const header = art(manifest, "header");
     const icon = art(manifest, "icon");
     const installed = row.installed;
     const tile = el("button", { class: "tile", type: "button", onclick: () => openCard(row.id) },
       el("div", { class: "art", style: header ? `background-image:url("${header}")` : null },
+        flags.fresh ? el("span", { class: "flag new", text: "New" }) : null,
+        flags.update ? el("span", { class: "flag update", text: "Update available" }) : null,
         icon ? el("img", { class: "icon", src: icon, alt: "" }) : null),
       el("div", { class: "body" },
         el("div", { class: "name", text: row.name }),
@@ -121,6 +153,7 @@ function renderCatalog() {
         el("div", { class: "foot" },
           el("div", { class: "chips" },
             el("span", { class: "chip", text: installed ? `Planted ${installed}` : row.version }),
+            seedStack(farm.social[row.id]),
             mark ? el("span", { class: `chip ${mark.kind}`, text: mark.text }) : null),
           el("span", { class: "btn small", text: installed ? "Open the card" : "Plant it" }))));
     grid.append(tile);
@@ -213,6 +246,15 @@ async function openCard(id) {
   farm.open = id;
   const dialog = $("card");
   const row = farm.catalog.find((r) => r.id === id) || {};
+  // Opening it is how New goes away. The corner clears here so that it is
+  // already gone behind the card, and Rust remembers it for the next run.
+  const flags = farm.marks[id];
+  if (flags && flags.fresh) {
+    flags.fresh = false;
+    renderCatalog();
+    invoke("card_seen", { id, version: row.version || null })
+      .catch(() => { /* it comes back next time, which is a small wrong thing */ });
+  }
   $("card-name").textContent = row.name || id;
   $("card-pitch").textContent = row.pitch || "";
   $("card-sub").textContent = "";
@@ -943,6 +985,52 @@ $("settings-doctor").addEventListener("click", async () => {
   }
 });
 
+// The two corners of every card ------------------------------------------
+//
+// Rust holds the rules and the seen map: whether an update is waiting, and
+// whether this launcher has ever drawn this app before. On the very first run
+// it marks the whole screen seen without a word, so that nobody's first look
+// at the farm is a wall of New badges.
+async function readMarks() {
+  if (!farm.catalog.length) {
+    farm.marks = {};
+    return;
+  }
+  const waiting = new Map(farm.installed.map((row) => [row.id, row.updateAvailable || null]));
+  try {
+    farm.marks = await invoke("catalog_marks", {
+      rows: farm.catalog.map((row) => ({
+        id: row.id,
+        version: row.version || null,
+        installed: row.installed || null,
+        updateAvailable: waiting.get(row.id) || null,
+      })),
+    });
+  } catch {
+    farm.marks = {}; // the cards draw without corners
+  }
+}
+
+// How many seeds each app has been given.
+//
+// Never waited on: the cards are already on screen by the time this is asked,
+// and each pile appears when the farm answers. The route caches for a minute,
+// so asking again inside that only spends somebody's network on an answer that
+// cannot have moved.
+let socialRead = 0;
+let socialFor = "";
+function readSocial() {
+  const ids = farm.catalog.map((row) => row.id);
+  if (!ids.length) return;
+  const asked = ids.join(",");
+  if (asked === socialFor && Date.now() - socialRead < 60000) return;
+  socialFor = asked;
+  socialRead = Date.now();
+  invoke("social_counts", { ids })
+    .then((counts) => { farm.social = counts || {}; renderCatalog(); })
+    .catch(() => { socialFor = ""; /* a card with no pile is still a card */ });
+}
+
 // Reading everything again ------------------------------------------------
 async function refresh() {
   try {
@@ -966,6 +1054,8 @@ async function refresh() {
   // the screen where that question makes sense.
   if (!farm.device.configured && wasHidden) lookForTiinys();
   lastRead = Date.now();
+  await readMarks();
+  readSocial();
   renderCatalog();
   renderInstalled();
   renderSettings();
