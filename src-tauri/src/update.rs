@@ -69,6 +69,18 @@ pub fn worth_showing(found: &str, dismissed: Option<&str>) -> bool {
     dismissed.map(str::trim) != Some(found)
 }
 
+/// Whether an explicit look should forget that somebody put this version away.
+///
+/// Not now is an answer about a version, and pressing Check for updates is a
+/// different answer about the same one. Without this, the About window would
+/// find a version, say the farm window has the button that installs it, and
+/// send somebody to a banner that `worth_showing` is still keeping quiet: a
+/// hand off to a thing that is not there.
+pub fn asking_undismisses(found: &str, dismissed: Option<&str>) -> bool {
+    let found = found.trim();
+    !found.is_empty() && dismissed.map(str::trim) == Some(found)
+}
+
 /// The line the menu bar carries while an update is waiting.
 pub fn tray_line(version: &str) -> String {
     format!("Tiiny App Farm {version} is ready")
@@ -109,6 +121,24 @@ mod tests {
         // of a file somebody could have edited.
         assert!(!worth_showing(" 0.1.3 ", Some("0.1.3")));
         assert!(!worth_showing("0.1.3", Some(" 0.1.3 ")));
+    }
+
+    #[test]
+    fn going_looking_takes_back_a_not_now_about_that_same_version() {
+        assert!(
+            asking_undismisses("0.2.0", Some("0.2.0")),
+            "this is the version somebody put away and has now gone looking for"
+        );
+        assert!(asking_undismisses(" 0.2.0 ", Some("0.2.0")));
+        // A different version was never put away, so there is nothing to take
+        // back, and a launcher with no answer on file has nothing either.
+        assert!(!asking_undismisses("0.2.1", Some("0.2.0")));
+        assert!(!asking_undismisses("0.2.0", None));
+        assert!(!asking_undismisses("", Some("")));
+        assert!(!asking_undismisses("   ", None));
+        // The two rules agree: once the answer is taken back, the banner shows.
+        assert!(!worth_showing("0.2.0", Some("0.2.0")));
+        assert!(worth_showing("0.2.0", None));
     }
 
     #[test]

@@ -936,16 +936,33 @@ async fn update_look(app: tauri::AppHandle) -> Result<Option<update::Ready>, Str
     let Some(ready) = found else {
         return Ok(None);
     };
-    let dismissed = app
-        .state::<Launcher>()
+    // Somebody who went looking has taken back a Not now about that same
+    // version by asking. Without this the About window would find a version,
+    // say the farm window has the button that installs it, and send somebody to
+    // a banner still keeping quiet about exactly that one.
+    let launcher = app.state::<Launcher>();
+    let held = launcher
         .settings
         .lock()
-        .ok()
-        .and_then(|held| held.dismissed_update.clone());
-    // Somebody who went looking has un-dismissed that version by asking: the
-    // banner is where the notes and the progress bar are, so the answer is put
-    // back on screen rather than only said once in the About window.
-    if update::worth_showing(&ready.version, dismissed.as_deref()) {
+        .map(|s| s.clone())
+        .unwrap_or_default();
+    if update::asking_undismisses(&ready.version, held.dismissed_update.as_deref()) {
+        let next = Settings {
+            dismissed_update: None,
+            ..held
+        };
+        // A dismissal that could not be cleared is a banner that stays quiet
+        // until the next release, which is a small wrong thing. Failing the
+        // button over it would be a larger one.
+        if next.write(&launcher.engine.config_dir()).is_ok() {
+            if let Ok(mut current) = launcher.settings.lock() {
+                *current = next;
+            }
+        }
+    }
+    // The banner is where the notes and the progress bar are, so the answer
+    // goes there too rather than being said once in the About window.
+    if update::worth_showing(&ready.version, None) {
         let _ = app.emit(update::READY_EVENT, ready.clone());
     }
     Ok(Some(ready))
