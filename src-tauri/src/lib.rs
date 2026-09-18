@@ -4,6 +4,7 @@
 //! its engine. Nothing here decides what an install means; the engine does,
 //! and this draws the answer.
 
+pub mod about;
 pub mod appwindow;
 pub mod badges;
 pub mod catalog;
@@ -195,6 +196,15 @@ type Answer<T> = Result<T, EngineError>;
 /// in logical points, and both are what docs/shots was measured at.
 pub const WINDOW: (f64, f64) = (1100.0, 720.0);
 pub const SMALLEST: (f64, f64) = (720.0, 560.0);
+
+/// The About window's label, and the size it is fixed at. It does not resize:
+/// there is one column of credits in it and nothing that a wider window would
+/// show more of.
+pub const ABOUT: &str = "about";
+pub const ABOUT_SIZE: (f64, f64) = (420.0, 715.0);
+
+/// The launcher's own log, in its config directory, written by `note`.
+pub const LOG: &str = "launcher.log";
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -771,7 +781,7 @@ fn note(app: &tauri::AppHandle, line: &str) {
     if let Ok(mut file) = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(dir.join("launcher.log"))
+        .open(dir.join(LOG))
     {
         let _ = writeln!(file, "{line}");
     }
@@ -909,6 +919,215 @@ async fn update_install(app: tauri::AppHandle) -> Result<(), String> {
     app.restart();
 }
 
+/// Look for a newer launcher now, because somebody asked.
+///
+/// The same look the four hour loop makes, with the same answer folded into the
+/// same held state and the same event emitted, so a check from the About window
+/// and a check that happened on its own leave the app in one condition. What
+/// comes back is for the person who pressed the button: `None` means this is
+/// the newest one, and anything else is already on its way to the banner.
+#[tauri::command]
+async fn update_look(app: tauri::AppHandle) -> Result<Option<update::Ready>, String> {
+    let found = look_once(&app).await?;
+    if let Ok(mut held) = app.state::<Launcher>().update_ready.lock() {
+        *held = found.clone();
+    }
+    tray::refresh(&app);
+    let Some(ready) = found else {
+        return Ok(None);
+    };
+    // Somebody who went looking has taken back a Not now about that same
+    // version by asking. Without this the About window would find a version,
+    // say the farm window has the button that installs it, and send somebody to
+    // a banner still keeping quiet about exactly that one.
+    let launcher = app.state::<Launcher>();
+    let held = launcher
+        .settings
+        .lock()
+        .map(|s| s.clone())
+        .unwrap_or_default();
+    if update::asking_undismisses(&ready.version, held.dismissed_update.as_deref()) {
+        let next = Settings {
+            dismissed_update: None,
+            ..held
+        };
+        // A dismissal that could not be cleared is a banner that stays quiet
+        // until the next release, which is a small wrong thing. Failing the
+        // button over it would be a larger one.
+        if next.write(&launcher.engine.config_dir()).is_ok() {
+            if let Ok(mut current) = launcher.settings.lock() {
+                *current = next;
+            }
+        }
+    }
+    // The banner is where the notes and the progress bar are, so the answer
+    // goes there too rather than being said once in the About window.
+    if update::worth_showing(&ready.version, None) {
+        let _ = app.emit(update::READY_EVENT, ready.clone());
+    }
+    Ok(Some(ready))
+}
+
+// --- The About window ----------------------------------------------------
+
+/// What the About window draws: the version cargo built, the day the changelog
+/// gives it, the licence, and the addresses it is allowed to open.
+#[tauri::command]
+fn about_info() -> about::About {
+    about::about(env!("CARGO_PKG_VERSION"))
+}
+
+/// Open the About window, or bring the one that is already open forward.
+///
+/// One instance, the same rule an app's window follows. A second About is two
+/// copies of the same unchanging page, and closing one of them would look like
+/// closing both.
+#[tauri::command]
+fn about_open(app: tauri::AppHandle) -> Result<(), String> {
+    about_window(&app).map_err(|error| format!("The About window would not open: {error}."))
+}
+
+pub fn about_window(app: &tauri::AppHandle) -> tauri::Result<()> {
+    if let Some(window) = app.get_webview_window(ABOUT) {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+        return Ok(());
+    }
+    let window = WebviewWindowBuilder::new(app, ABOUT, WebviewUrl::App("about.html".into()))
+        .title("About Tiiny App Farm")
+        .inner_size(ABOUT_SIZE.0, ABOUT_SIZE.1)
+        .resizable(false)
+        .maximizable(false)
+        .center()
+        .build()?;
+    // The same thing the main window needs: a window that has never been placed
+    // is given a first frame by something between the builder and the window
+    // server, and saying the size again once it exists is what is taken. See
+    // the note in setup.
+    let _ = window.set_size(tauri::LogicalSize::new(ABOUT_SIZE.0, ABOUT_SIZE.1));
+    let _ = window.center();
+    Ok(())
+}
+
+/// The application menu, on macOS only.
+///
+/// It exists for one item. macOS builds an About item into every application
+/// menu and wires it to a panel that says the name, the version and the
+/// copyright line out of the bundle; this replaces that item with the launcher's
+/// own window. A menu is set whole rather than edited, so everything Tauri's
+/// default menu carried is written out here again.
+///
+/// Two of those are not decoration. **Edit** is how Cmd+V reaches a web view on
+/// macOS, and the one place anybody types into this app is the masked field the
+/// Tiiny's key is pasted into: no Edit menu, no paste, and no way in. **Window**
+/// is how Cmd+W closes the About window.
+///
+/// There is deliberately nothing here for Windows or Linux. Tauri only puts a
+/// default menu on macOS, so those two have never had one, and a menu set on
+/// them is drawn as a strip inside the window itself, above a page that already
+/// has its own header. On those two the About window is reached from the tray
+/// and from Settings, which is where they keep it anyway.
+#[cfg(target_os = "macos")]
+fn menubar(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
+    use tauri::menu::{Menu, MenuItemBuilder, PredefinedMenuItem, Submenu};
+
+    let about = MenuItemBuilder::with_id(ABOUT, "About Tiiny App Farm").build(app)?;
+
+    let edit = Submenu::with_items(
+        app,
+        "Edit",
+        true,
+        &[
+            &PredefinedMenuItem::undo(app, None)?,
+            &PredefinedMenuItem::redo(app, None)?,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::cut(app, None)?,
+            &PredefinedMenuItem::copy(app, None)?,
+            &PredefinedMenuItem::paste(app, None)?,
+            &PredefinedMenuItem::select_all(app, None)?,
+        ],
+    )?;
+
+    let window = Submenu::with_items(
+        app,
+        "Window",
+        true,
+        &[
+            &PredefinedMenuItem::minimize(app, None)?,
+            &PredefinedMenuItem::maximize(app, None)?,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::close_window(app, None)?,
+        ],
+    )?;
+
+    {
+        let app_menu = Submenu::with_items(
+            app,
+            "Tiiny App Farm",
+            true,
+            &[
+                &about,
+                &PredefinedMenuItem::separator(app)?,
+                &PredefinedMenuItem::services(app, None)?,
+                &PredefinedMenuItem::separator(app)?,
+                &PredefinedMenuItem::hide(app, None)?,
+                &PredefinedMenuItem::hide_others(app, None)?,
+                &PredefinedMenuItem::separator(app)?,
+                &PredefinedMenuItem::quit(app, None)?,
+            ],
+        )?;
+        let file = Submenu::with_items(
+            app,
+            "File",
+            true,
+            &[&PredefinedMenuItem::close_window(app, None)?],
+        )?;
+        let view = Submenu::with_items(
+            app,
+            "View",
+            true,
+            &[&PredefinedMenuItem::fullscreen(app, None)?],
+        )?;
+        let help = Submenu::with_items(app, "Help", true, &[])?;
+        Menu::with_items(app, &[&app_menu, &file, &edit, &view, &window, &help])
+    }
+}
+
+/// Escape, from the page. The window closes itself in Rust rather than being
+/// handed the permission to close windows, because that permission is not
+/// needed for anything else this app does.
+#[tauri::command]
+fn about_close(app: tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window(ABOUT) {
+        let _ = window.close();
+    }
+}
+
+/// Show the launcher's own log in the file manager.
+///
+/// The log is the file `note` writes, and it only exists once something has
+/// been worth writing down. A launcher that has had nothing to say says that,
+/// rather than opening a folder and leaving somebody looking for a file that
+/// was never made.
+#[tauri::command]
+fn open_log(app: tauri::AppHandle) -> Result<String, String> {
+    use tauri_plugin_opener::OpenerExt;
+    let path = app.state::<Launcher>().engine.config_dir().join(LOG);
+    if !path.is_file() {
+        return Err(
+            "The launcher has not had to write anything down yet, so there is no log.".to_string(),
+        );
+    }
+    app.opener().reveal_item_in_dir(&path).map_err(|error| {
+        format!(
+            "The log is at {} and would not open: {error}.",
+            path.display()
+        )
+    })?;
+    Ok(path.display().to_string())
+}
+
 /// How many seeds each app on the screen has been given, and the pile that
 /// draws. Read from the farm rather than from the engine, and never waited on:
 /// the cards are already up by the time this answers.
@@ -965,14 +1184,23 @@ fn take_deep_link(app: tauri::State<'_, Launcher>) -> Option<String> {
         .and_then(|mut held| held.take())
 }
 
+/// Everywhere the launcher will send somebody, and nowhere else.
+///
+/// An app running on this computer, the farm's own site, and the handful of
+/// addresses the About window credits. Written as one function rather than
+/// inside the command so that the rule can be tested without an app around it.
+/// The About window's addresses are exact matches rather than prefixes; see
+/// `about::ALLOWED`.
+pub fn opens(url: &str) -> bool {
+    url.starts_with("http://localhost:")
+        || url.starts_with("http://127.0.0.1:")
+        || url.starts_with(catalog::SITE)
+        || about::allows(url)
+}
+
 #[tauri::command]
 fn open_external(app: tauri::AppHandle, url: String) -> Result<(), String> {
-    // Only the two places the launcher ever sends somebody: an app running on
-    // this computer, and the farm's own site.
-    let allowed = url.starts_with("http://localhost:")
-        || url.starts_with("http://127.0.0.1:")
-        || url.starts_with(catalog::SITE);
-    if !allowed {
+    if !opens(&url) {
         return Err(format!("The launcher does not open {url}."));
     }
     use tauri_plugin_opener::OpenerExt;
@@ -1226,6 +1454,19 @@ pub fn run() {
         ));
     }
 
+    // The application menu is a macOS thing. See `menubar`.
+    #[cfg(target_os = "macos")]
+    {
+        builder = builder.menu(menubar);
+        // The only item this app puts on that menu of its own, and the reason
+        // the menu is built by hand at all.
+        builder = builder.on_menu_event(|app, event| {
+            if event.id().0.as_str() == ABOUT {
+                let _ = about_window(app);
+            }
+        });
+    }
+
     builder
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init())
@@ -1259,6 +1500,11 @@ pub fn run() {
             update_pending,
             update_dismiss,
             update_install,
+            update_look,
+            about_info,
+            about_open,
+            about_close,
+            open_log,
             take_deep_link,
             open_external,
             open_app,
@@ -1356,7 +1602,25 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::app_id_in;
+    use super::{about, app_id_in, opens};
+
+    #[test]
+    fn every_address_the_about_window_credits_is_one_the_launcher_will_open() {
+        for url in about::ALLOWED {
+            assert!(opens(url), "the About window offers {url} and the opener refuses it, which is a row that looks like a link and is not one");
+        }
+    }
+
+    #[test]
+    fn the_launcher_opens_an_app_on_this_computer_the_farm_and_nothing_else() {
+        assert!(opens("http://localhost:8420/"));
+        assert!(opens("http://127.0.0.1:8420/"));
+        assert!(opens("https://tiinyapp.farm/apps/story-lantern/"));
+        assert!(!opens("http://192.168.1.5:8420/"));
+        assert!(!opens("https://example.com"));
+        assert!(!opens("file:///etc/passwd"));
+        assert!(!opens(""));
+    }
 
     #[test]
     fn an_install_link_names_one_app() {

@@ -7,6 +7,37 @@ the diff.
 
 This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.1.4 - 2026-09-18
+
+### Added
+
+- **An About window that says who made this and where it lives.** The panel
+  macOS used to put up named the app, its version and a copyright line, and
+  nothing in it went anywhere. This one is the whole credit roll: Titanium
+  Computing, who build and keep the farm, and Jason Brashear, who wrote it, on
+  GitHub and on his own site. Tiiny, the AI Pocket Lab every app here talks to.
+  The farm itself, and Titanium Bot beside it, the same pair the farm's own
+  footer carries. The launcher's source on GitHub and the licence it is
+  published under. Every one of them has its mark beside it, says in one line
+  what it is, and opens in your own browser rather than inside this app. On a
+  Mac it is the About item in the application menu, which used to put up that
+  panel. Everywhere it is in the menu bar or tray icon's menu, and in
+  Settings.
+- **Check for updates, on a button.** The launcher has looked for a newer
+  version on its own since 0.1.2, when it opens and every four hours after.
+  Now you can also just ask, and be told the answer in words: either you are on
+  the newest one, or the strip at the top of the farm has the button that
+  installs the one that is waiting.
+- **Show the log.** The launcher writes down the few things it decides not to
+  interrupt you about, and this puts that file in front of you. A launcher that
+  has had nothing to say says that instead.
+
+### Changed
+
+- The version and the release date in the About window are read from the build
+  and from this file, so there is no number in that window anybody has to
+  remember to change.
+
 ## 0.1.3 - 2026-09-18
 
 ### Changed

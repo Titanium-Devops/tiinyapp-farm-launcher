@@ -57,6 +57,7 @@ const ANSWERS = {
   app_needs: { models: null, shortBy: {}, needs: {} },
   catalog_marks: {},
   social_counts: {},
+  about_open: null,
   take_deep_link: null,
   models_watch: null,
   update_pending: null,
@@ -156,15 +157,139 @@ ok("Not now hides it", $("update-banner").hidden === true);
 const dismissed = asked.filter((a) => a.name === "update_dismiss").pop();
 ok("and tells Rust which version to keep quiet about", dismissed && dismissed.args.version === "0.1.4");
 
+// Settings is the third way into the About window, after the menu bar and the
+// tray. Those two are Rust; this one is the page.
+$("settings-about").dispatchEvent(new window.Event("click"));
+await settle();
+ok("Settings opens the About window", asked.some((a) => a.name === "about_open"));
+
 // The page keeps an eight second poll running and jsdom keeps a frame loop, so
 // the process would sit here for ever waiting for a window nobody is looking
 // at. Close it and say what happened.
 window.close();
+
+// The About window ---------------------------------------------------------
+//
+// It is a second page with a second bridge, so it gets a second jsdom. What is
+// worth holding here is not the drawing but the two things that would be wrong
+// in a way nobody would notice: a link the launcher refuses, drawn as if it
+// were a door, and a version number typed into the page instead of read.
+
+process.stdout.write("\nthe About window\n");
+
+// The allow list, read out of the Rust that enforces it. Two copies of a list
+// is one copy and one lie, so the test compares the page against the real one
+// rather than against a third copy written here.
+const aboutRs = fs.readFileSync(path.join(root, "src-tauri/src/about.rs"), "utf8");
+const listed = aboutRs.match(/pub const ALLOWED: &\[&str\] = &\[([\s\S]*?)\n\];/);
+if (!listed) {
+  process.stderr.write("  FAIL  src-tauri/src/about.rs has no ALLOWED array to read\n");
+  process.exit(1);
+}
+const ALLOWED = [...listed[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+ok("Rust's allow list was found and is not empty", ALLOWED.length > 0);
+ok("and every address on it is https", ALLOWED.every((url) => url.startsWith("https://")));
+
+const aboutAsked = [];
+const ABOUT_ANSWERS = {
+  about_info: { version: "9.9.9", released: "September 18, 2026", license: "MIT", links: ALLOWED },
+  open_external: null,
+  about_close: null,
+  open_log: null,
+  update_look: null,
+};
+
+const aboutDom = new JSDOM(fs.readFileSync(path.join(ui, "about.html"), "utf8"), {
+  url: "http://localhost/",
+  runScripts: "outside-only",
+  pretendToBeVisual: true,
+});
+const aboutWindow = aboutDom.window;
+aboutWindow.__TAURI__ = {
+  core: {
+    invoke: (name, args) => {
+      aboutAsked.push({ name, args });
+      if (name in ABOUT_ANSWERS) return Promise.resolve(ABOUT_ANSWERS[name]);
+      return Promise.reject(new Error(`no stub for ${name}`));
+    },
+  },
+};
+aboutWindow.eval(fs.readFileSync(path.join(ui, "about.js"), "utf8"));
+const $$ = (id) => aboutWindow.document.getElementById(id);
+const aboutSettle = () => new Promise((done) => aboutWindow.setTimeout(done, 0));
+await aboutSettle();
+await aboutSettle();
+
+// Every door in the page, and every door Rust knows about, are the same doors.
+const drawn = [...aboutWindow.document.querySelectorAll("[data-open]")]
+  .map((node) => node.getAttribute("data-open"));
+ok("the page carries a link for every address Rust allows",
+  ALLOWED.every((url) => drawn.includes(url)));
+ok("and no link Rust would refuse",
+  drawn.every((url) => ALLOWED.includes(url)));
+ok("each address is drawn once", new Set(drawn).size === drawn.length);
+ok("the four brand marks and the plain icons are all there",
+  aboutWindow.document.querySelectorAll(".ico img").length === 4 &&
+  aboutWindow.document.querySelectorAll(".ico svg, .foot svg").length >= 4);
+
+// The version is whatever the app said it was, never a number in the markup.
+ok("the version line is the one Rust answered with",
+  $$("version").textContent === "Version 9.9.9, released September 18, 2026");
+ok("and the licence is named the way Rust named it", $$("licence-name").textContent === "MIT licence");
+// The markup's own words, with the tags and the comments taken out, so that
+// coordinates inside an SVG path are not mistaken for a version number.
+const aboutWords = fs.readFileSync(path.join(ui, "about.html"), "utf8")
+  .replace(/<!--[\s\S]*?-->/g, " ")
+  .replace(/<[^>]*>/g, " ");
+ok("nothing anybody reads in about.html is a version number typed in by hand",
+  !/\d+\.\d+\.\d+/.test(aboutWords));
+
+// A link goes out through the launcher's opener, never into this web view.
+const source = aboutWindow.document.querySelector('[data-open="https://tiiny.ai"]');
+source.dispatchEvent(new aboutWindow.Event("click"));
+await aboutSettle();
+const opened = aboutAsked.filter((a) => a.name === "open_external").pop();
+ok("pressing a credit hands the address to the system opener",
+  opened && opened.args.url === "https://tiiny.ai");
+ok("and there is no anchor in the page that could open it in here",
+  aboutWindow.document.querySelectorAll("a[href]").length === 0);
+
+// A page whose list does not have an address opens nothing at all, even though
+// Rust would refuse it too. Two locks, because this one is the cheap one.
+const before = aboutAsked.filter((a) => a.name === "open_external").length;
+ABOUT_ANSWERS.about_info = { version: "9.9.9", released: null, license: "MIT", links: [] };
+aboutWindow.document.querySelector('[data-open="https://titanium.bot"]').dispatchEvent(new aboutWindow.Event("click"));
+await aboutSettle();
+ok("a link the launcher would refuse is not even asked for",
+  aboutAsked.filter((a) => a.name === "open_external").length === before + 1);
+
+// Check for updates says the answer in words.
+$$("check").dispatchEvent(new aboutWindow.Event("click"));
+await aboutSettle();
+ok("Check for updates makes the same look the banner does",
+  aboutAsked.some((a) => a.name === "update_look"));
+ok("and says so when there is nothing newer",
+  $$("answer").textContent === "You are on the newest version.");
+
+ABOUT_ANSWERS.update_look = { version: "0.2.0", notes: null, date: null };
+$$("check").dispatchEvent(new aboutWindow.Event("click"));
+await aboutSettle();
+ok("and hands a newer one off to the banner rather than installing it here",
+  $$("answer").textContent.includes("0.2.0") && $$("answer").textContent.includes("farm window"));
+ok("the About window never installs an update itself",
+  !aboutAsked.some((a) => a.name === "update_install"));
+
+// Escape closes it.
+aboutWindow.dispatchEvent(new aboutWindow.KeyboardEvent("keydown", { key: "Escape" }));
+await aboutSettle();
+ok("Escape closes the window", aboutAsked.some((a) => a.name === "about_close"));
+
+aboutWindow.close();
 
 process.stdout.write("\n");
 if (failed) {
   process.stderr.write(`${failed} failed\n`);
   process.exit(1);
 }
-process.stdout.write("the window draws the update banner the way it is meant to\n");
+process.stdout.write("the window draws the update banner, and the About window credits everybody it should\n");
 process.exit(0);

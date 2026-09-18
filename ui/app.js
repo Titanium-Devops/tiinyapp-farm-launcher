@@ -923,6 +923,17 @@ function renderSettings() {
   }
 }
 
+// The same window the menu bar's About item and the tray both open. Settings
+// is where somebody goes looking for what version this is, so the credits are
+// one press away from the facts.
+$("settings-about").addEventListener("click", async () => {
+  try {
+    await invoke("about_open");
+  } catch (error) {
+    say(sentence(error));
+  }
+});
+
 $("toggle-autostart").addEventListener("click", () => flip("autostart"));
 $("toggle-path").addEventListener("click", () => flip("farmOnPath"));
 $("toggle-browser").addEventListener("click", () => flip("openInBrowser"));

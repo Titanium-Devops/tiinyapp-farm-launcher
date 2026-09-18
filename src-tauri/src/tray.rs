@@ -135,6 +135,11 @@ fn menu<R: Runtime>(
     }
     builder = builder.item(&PredefinedMenuItem::separator(app)?);
     builder = builder.item(&MenuItemBuilder::with_id("show", "Show the farm").build(app)?);
+    // The same window the menu bar's About item opens, because the menu bar is
+    // the whole app when the window is closed and this is where somebody looking
+    // for what version they have would go.
+    builder =
+        builder.item(&MenuItemBuilder::with_id(crate::ABOUT, "About Tiiny App Farm").build(app)?);
     builder = builder.item(&PredefinedMenuItem::separator(app)?);
     builder = builder.item(&MenuItemBuilder::with_id("quit", "Quit").build(app)?);
     builder.build()
@@ -202,6 +207,9 @@ fn on_menu(app: &AppHandle, id: &str) {
         // The menu bar says an update is ready; the window is where it is
         // taken, because that is where the notes and the progress bar are.
         "launcher-update" => crate::raise(app),
+        crate::ABOUT => {
+            let _ = crate::about_window(app);
+        }
         "quit" => app.exit(0),
         other => {
             let Some((verb, ident)) = other.split_once(':') else {

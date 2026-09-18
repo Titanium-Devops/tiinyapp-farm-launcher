@@ -1,0 +1,162 @@
+/* The About window.
+ *
+ * app.css is loaded first and brings the farm's colours, its two typefaces and
+ * its buttons. This file is only the shapes this one window needs, and every
+ * class name in it was grepped against app.css before it was used: `.row`,
+ * `.empty` and `header` are all taken there, so the credits are `.credit`, the
+ * top is a `div.hero`, and nothing here leans on a rule written for the grid.
+ *
+ * The window does not resize, so this is one column at one width. The hero and
+ * the footer are pinned and the credits scroll between them: a machine whose
+ * fonts come out taller than this one's gets a scrollbar rather than a row
+ * sliced in half.
+ */
+
+body.about {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  font-size: 14px;
+}
+
+/* Who this is --------------------------------------------------------- */
+.hero {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 13px 18px 12px;
+  border-bottom: 1px solid var(--fence);
+  /* The night, lifted just enough that the credits below read as a list on a
+     surface rather than as more of the same. */
+  background: radial-gradient(130% 110% at 14% 0%, rgba(242, 196, 98, .1), transparent 72%);
+}
+.hero-mark {
+  flex: none;
+  width: 52px; height: 52px;
+  border-radius: 50%;
+  object-fit: cover;
+  display: block;
+}
+.hero-said { min-width: 0 }
+.hero h1 { font-size: 20px; margin: 0 }
+.hero-version { margin: 3px 0 0; color: var(--mute); font-size: 12.5px }
+.hero-grown { margin: 4px 0 0; color: var(--hay); font-size: 12.5px; font-weight: 700 }
+
+/* Everyone who had a hand in it --------------------------------------- */
+.credits {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  /* app.css gives every `main` a wide page's padding and a 1180px cap. */
+  padding: 3px 16px 6px;
+  max-width: none;
+  margin: 0;
+}
+.sec { margin-top: 8px }
+.sec h2 {
+  font: 700 13px var(--display);
+  color: var(--hay);
+  margin: 0 0 6px 2px;
+  letter-spacing: .02em;
+}
+
+.credit {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  margin-bottom: 4px;
+  padding: 7px 10px;
+  border: 1px solid var(--fence);
+  border-radius: 13px;
+  background: var(--soil);
+  color: var(--ink);
+  font: 400 14px var(--body);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color .15s ease-out, background .15s ease-out;
+}
+.credit:last-child { margin-bottom: 0 }
+.credit:hover { border-color: var(--hay); background: #171e28 }
+.credit:active { transform: translateY(1px) }
+/* The one credit that is not itself a door: it holds two smaller ones. */
+.credit.flat { cursor: default }
+.credit.flat:hover { border-color: var(--fence); background: var(--soil) }
+.credit.flat:active { transform: none }
+
+.ico {
+  flex: none;
+  width: 33px; height: 33px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, .05);
+  color: var(--ink);
+  overflow: hidden;
+}
+.ico img { width: 22px; height: 22px; object-fit: contain; display: block }
+/* A wordmark is wide and short, so it is given the width rather than squeezed
+   into the square a square mark wants. */
+.ico.wide { width: 44px; border-radius: 11px }
+.ico.wide img { width: 36px; height: 19px }
+.glyph { width: 19px; height: 19px; display: block }
+.glyph.stroke {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.said { flex: 1 1 auto; min-width: 0 }
+.said b { display: block; font-size: 13.5px; line-height: 1.35 }
+.said small { display: block; color: var(--mute); font-size: 12px; line-height: 1.35; margin-top: 1px }
+
+/* The chevron that says a row goes somewhere. Drawn rather than an image
+   because it is two lines. */
+.go {
+  flex: none;
+  width: 8px; height: 8px;
+  margin-right: 3px;
+  border-right: 2px solid var(--mute);
+  border-top: 2px solid var(--mute);
+  transform: rotate(45deg);
+}
+.credit:hover .go { border-color: var(--hay) }
+
+.pair { flex: none; display: flex; gap: 6px }
+.ico.mini {
+  width: 30px; height: 30px;
+  border: 1px solid var(--fence);
+  border-radius: 9px;
+  padding: 0;
+  cursor: pointer;
+  transition: border-color .15s ease-out, color .15s ease-out;
+}
+.ico.mini:hover { border-color: var(--hay); color: var(--hay) }
+.ico.mini:active { transform: translateY(1px) }
+.ico.mini .glyph { width: 16px; height: 16px }
+
+/* What you can do from here ------------------------------------------- */
+.foot {
+  flex: none;
+  padding: 10px 16px 12px;
+  border-top: 1px solid var(--fence);
+  background: var(--night);
+}
+.foot-act { display: flex; gap: 8px; align-items: center }
+.foot .btn { flex: 1 1 auto }
+.foot .glyph { width: 15px; height: 15px }
+/* Always in the layout, empty until there is something to say, so that pressing
+   a button never moves the credits above it or slices the last one in half. */
+.answer {
+  margin: 7px 2px 0;
+  min-height: 17px;
+  color: var(--mute);
+  font-size: 12.5px;
+  line-height: 1.35;
+}
+.answer.good { color: var(--mint) }
+.answer.bad { color: var(--bad) }
