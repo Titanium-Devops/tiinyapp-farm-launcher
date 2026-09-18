@@ -20,6 +20,20 @@
   <main>
     <!-- The farm ---------------------------------------------------- -->
     <section id="view-farm">
+      <!-- The launcher's own update. Above the Tiiny banner because it is
+           about the app somebody is looking at, not about what it talks to. -->
+      <div class="upgrade" id="update-banner" hidden>
+        <div class="upgrade-said">
+          <strong id="update-line">A newer Tiiny App Farm is ready.</strong>
+          <span id="update-notes"></span>
+        </div>
+        <div class="upgrade-act">
+          <button class="btn small" type="button" id="update-go">Update and restart</button>
+          <button class="btn quiet" type="button" id="update-later">Not now</button>
+        </div>
+        <div class="bar" id="update-bar" hidden><i id="update-bar-fill" style="width:0%"></i></div>
+      </div>
+
       <div class="banner" id="device-banner" hidden>
         <h2>Find your Tiiny</h2>
         <p id="device-note">Apps run on this computer and talk to the Tiiny on your network. The farm looks on every USB cable, on this network, and at the TiinyOS client.</p>

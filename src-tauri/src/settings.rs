@@ -30,6 +30,10 @@ pub struct Settings {
     /// nothing: the first screen marks everything seen without a word, so that
     /// nobody's first look at the farm is a wall of New badges.
     pub seen: Option<BTreeMap<String, String>>,
+    /// The launcher version somebody said Not now to. That one version stays
+    /// quiet; the next one asks again, because saying no to 0.1.3 is not saying
+    /// no to every version after it.
+    pub dismissed_update: Option<String>,
 }
 
 impl Settings {
@@ -56,6 +60,7 @@ impl Settings {
     pub fn from_window(self, held: &Settings) -> Settings {
         Settings {
             seen: held.seen.clone(),
+            dismissed_update: held.dismissed_update.clone(),
             ..self
         }
     }
@@ -82,6 +87,7 @@ mod tests {
         assert!(!settings.open_in_browser);
         assert_eq!(settings.manual_base, None);
         assert_eq!(settings.seen, None);
+        assert_eq!(settings.dismissed_update, None);
     }
 
     #[test]
@@ -105,6 +111,7 @@ mod tests {
             manual_base: Some("http://172.17.7.177/v1".into()),
             open_in_browser: true,
             seen: Some(BTreeMap::from([("story-lantern".into(), "0.1.3".into())])),
+            dismissed_update: Some("0.1.9".into()),
         };
         settings.write(&dir).unwrap();
         assert_eq!(Settings::read(&dir), settings);
@@ -127,6 +134,22 @@ mod tests {
         let saved = from_the_window.from_window(&held);
         assert!(saved.autostart, "the switch the window changed is honoured");
         assert_eq!(saved.seen, held.seen, "and the seen map is the launcher's");
+    }
+
+    #[test]
+    fn the_settings_pane_cannot_un_dismiss_an_update_either() {
+        let held = Settings {
+            dismissed_update: Some("0.1.3".into()),
+            ..Settings::default()
+        };
+        let from_the_window = Settings {
+            open_in_browser: true,
+            dismissed_update: None,
+            ..Settings::default()
+        };
+        let saved = from_the_window.from_window(&held);
+        assert!(saved.open_in_browser);
+        assert_eq!(saved.dismissed_update.as_deref(), Some("0.1.3"));
     }
 
     #[test]

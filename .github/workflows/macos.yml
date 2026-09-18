@@ -42,6 +42,24 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: npm ci
+        run: npm ci
+
+      # The three checks that are cheap and catch the failures nobody sees
+      # until it is too late: a version that disagrees with itself, a workflow
+      # GitHub cannot parse, and the update banner, which otherwise only
+      # appears once every four hours and only when there is a release.
+      - name: The version agrees with itself and has an entry
+        run: node scripts/check-release-notes.mjs
+
+      - name: The workflows parse and their shell scripts are shell
+        run: node scripts/check-workflows.mjs
+
+      - name: The window draws the update banner
+        run: node scripts/check-ui.mjs
 
       # tauri-build refuses to build at all when a declared resource path is
       # not there, and `runtime` is not committed: it is fetched and staged.

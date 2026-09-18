@@ -107,6 +107,49 @@ jobs:
           fi
           echo "the AppImage is an executable ELF of $SIZE bytes"
 
+      # The same order as Windows, and for a simpler reason: nothing rewrites
+      # an AppImage after it is built, but signing the final file rather than
+      # asking the bundler to do it keeps one rule across all three platforms,
+      # which is that the signature is made over the bytes that get uploaded.
+      # No key, no signature, and no linux-x86_64 row in the feed: an installed
+      # Linux copy then just never sees an update, which is where it was before.
+      - name: Sign the AppImage for the updater
+        if: env.UPDATER_KEY != ''
+        env:
+          UPDATER_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -eu
+          DIR=src-tauri/target/release/bundle/appimage
+          APP=$(ls "$DIR"/*.AppImage | head -1)
+          rm -f "$DIR"/*.AppImage.sig
+          npx tauri signer sign "$APP"
+          test -s "$APP.sig"
+          node scripts/verify-updater-signature.mjs "$APP" "$APP.sig"
+
+      - name: Write the feed fragment
+        if: env.UPDATER_KEY != ''
+        env:
+          UPDATER_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          set -eu
+          DIR=src-tauri/target/release/bundle/appimage
+          APP=$(ls "$DIR"/*.AppImage | head -1)
+          node -e '
+            const fs = require("fs");
+            const path = require("path");
+            const [app, sigfile] = process.argv.slice(1);
+            const version = require("./src-tauri/tauri.conf.json").version;
+            const name = path.basename(app).replace(/[^A-Za-z0-9._-]+/g, "-");
+            const signature = fs.readFileSync(sigfile, "utf8").trim();
+            const url = `https://tiinyapp.farm/launcher/${name}`;
+            fs.mkdirSync("feed", { recursive: true });
+            fs.writeFileSync("feed/linux-x86_64.json",
+              JSON.stringify({ version, key: "linux-x86_64", signature, url }, null, 2) + "\n");
+          ' "$APP" "$APP.sig"
+          cat feed/linux-x86_64.json
+
       # What the bytes are, written by the machine that made them, so whatever
       # publishes them later has something to compare against. Same shape as the
       # other two platforms write.
@@ -123,5 +166,7 @@ jobs:
           name: tiinyapp-farm-launcher-linux-appimage
           path: |
             src-tauri/target/release/bundle/appimage/*.AppImage
+            src-tauri/target/release/bundle/appimage/*.AppImage.sig
             src-tauri/target/release/bundle/appimage/SHA256SUMS
+            feed/linux-x86_64.json
           if-no-files-found: error

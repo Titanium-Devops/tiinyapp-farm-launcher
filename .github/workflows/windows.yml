@@ -138,6 +138,7 @@ jobs:
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          UPDATER_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         shell: bash
         run: |
           on_main='${{ github.ref == 'refs/heads/main' }}'
@@ -154,7 +155,15 @@ jobs:
           [ -n "$AZURE_SUBSCRIPTION_ID" ] || missing="$missing AZURE_SUBSCRIPTION_ID"
           if [ "$on_main" = "true" ] && [ -z "$missing" ]; then sign=true; fi
           echo "sign=$sign" >> "$GITHUB_OUTPUT"
-          echo "sign=$sign on_main=$on_main missing=${missing:-none}"
+          # The updater signature is made after Authenticode, over the signed
+          # bytes, so it needs the Tauri key as well as a signed installer.
+          updater=false
+          if [ "$sign" = "true" ] && [ -n "$UPDATER_KEY" ]; then updater=true; fi
+          echo "updater=$updater" >> "$GITHUB_OUTPUT"
+          echo "sign=$sign updater=$updater on_main=$on_main missing=${missing:-none}"
+          if [ "$sign" = "true" ] && [ "$updater" != "true" ]; then
+            echo "::notice::No Windows updater signature. TAURI_SIGNING_PRIVATE_KEY is not set, so latest.json will carry no windows-x86_64 row and installed Windows copies will not update themselves."
+          fi
           if [ "$sign" != "true" ] && [ -n "$missing" ]; then
             echo "::notice::Building UNSIGNED because these are not set:$missing. The installer will build and upload; it will not carry an Authenticode signature."
           elif [ "$sign" != "true" ]; then
@@ -199,6 +208,69 @@ jobs:
           $sig.SignerCertificate | Format-List Subject, NotBefore, NotAfter
           if ($sig.Status -ne 'Valid') { exit 1 }
 
+      # ORDER MATTERS, AND IT IS THE WHOLE POINT OF THIS STEP.
+      #
+      # Authenticode rewrites the installer: the certificate goes into the PE
+      # file and every byte after the checksum moves. A Tauri updater signature
+      # made at bundle time is a signature over the file as it was BEFORE that,
+      # so it verifies against bytes nobody will ever download, and every
+      # Windows update fails with a signature error that looks like the key is
+      # wrong. So the installer is not built with createUpdaterArtifacts at all;
+      # the signature is made here, by hand, over the final signed file. The
+      # updater artifact on Windows IS the NSIS installer, so there is nothing
+      # else to sign.
+      - name: Sign the final installer for the updater
+        if: steps.gate.outputs.updater == 'true'
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -eu
+          DIR="$CARGO_TARGET_DIR/release/bundle/nsis"
+          EXE=$(ls "$DIR"/*.exe | head -1)
+          # Nothing from the bundler should be lying around claiming to be this.
+          rm -f "$DIR"/*.exe.sig
+          npx tauri signer sign "$EXE"
+          test -s "$EXE.sig"
+          echo "signed $(basename "$EXE") for the updater"
+
+      # A signature over the wrong bytes is the failure that looks like success
+      # until somebody tries to update, so it is checked here against the very
+      # file that will be uploaded, with the public key the shipped app carries.
+      - name: The updater signature verifies against the bytes we will publish
+        if: steps.gate.outputs.updater == 'true'
+        shell: bash
+        run: |
+          set -eu
+          DIR="$CARGO_TARGET_DIR/release/bundle/nsis"
+          EXE=$(ls "$DIR"/*.exe | head -1)
+          node scripts/verify-updater-signature.mjs "$EXE" "$EXE.sig"
+
+      - name: Write the feed fragment
+        if: steps.gate.outputs.updater == 'true'
+        shell: bash
+        run: |
+          set -eu
+          DIR="$CARGO_TARGET_DIR/release/bundle/nsis"
+          EXE=$(ls "$DIR"/*.exe | head -1)
+          node -e '
+            const fs = require("fs");
+            const path = require("path");
+            const [exe, sigfile] = process.argv.slice(1);
+            const version = require("./src-tauri/tauri.conf.json").version;
+            // One flat filename, the same rule the Mac fragments follow: the
+            // farm worker refuses any launcher key with a slash in it, and the
+            // version inside the name is what earns it a one year cache.
+            const name = path.basename(exe).replace(/[^A-Za-z0-9._-]+/g, "-");
+            const signature = fs.readFileSync(sigfile, "utf8").trim();
+            const url = `https://tiinyapp.farm/launcher/${name}`;
+            fs.mkdirSync("feed", { recursive: true });
+            fs.writeFileSync("feed/windows-x86_64.json",
+              JSON.stringify({ version, key: "windows-x86_64", signature, url }, null, 2) + "\n");
+          ' "$EXE" "$EXE.sig"
+          cat feed/windows-x86_64.json
+
       - name: The installer's size, measured rather than projected
         shell: bash
         run: ls -l "${{ env.CARGO_TARGET_DIR }}"/release/bundle/nsis/*.exe
@@ -224,5 +296,7 @@ jobs:
           name: tiinyapp-farm-launcher-windows-installer
           path: |
             ${{ env.CARGO_TARGET_DIR }}/release/bundle/nsis/*.exe
+            ${{ env.CARGO_TARGET_DIR }}/release/bundle/nsis/*.exe.sig
             ${{ env.CARGO_TARGET_DIR }}/release/bundle/nsis/SHA256SUMS
+            feed/windows-x86_64.json
           if-no-files-found: error

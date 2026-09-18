@@ -14,6 +14,7 @@ pub mod settings;
 pub mod state;
 pub mod tray;
 pub mod trouble;
+pub mod update;
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -47,6 +48,10 @@ pub struct Launcher {
     /// newer than the answer coming back; this is how the older answer knows
     /// not to overwrite it.
     pub snapshot_moved: AtomicU64,
+    /// The newer launcher the last look found, if it found one. Held so that a
+    /// window opened after the look still learns about it, and so the menu bar
+    /// can say the same thing the banner does.
+    pub update_ready: Mutex<Option<update::Ready>>,
 }
 
 /// One watch on the Tiiny's models, kept alive while the window is open.
@@ -715,6 +720,195 @@ fn card_seen(app: tauri::AppHandle, id: String, version: Option<String>) -> Resu
     Ok(())
 }
 
+// --- The launcher updating itself ---------------------------------------
+
+/// Where the launcher asks about newer versions of itself.
+///
+/// Normally the endpoint in tauri.conf.json, which is the farm's own feed. The
+/// environment variable is for proving the thing works before there is a newer
+/// release to prove it with: a real self-update can only be witnessed at the
+/// release after the one that adds it. It is read from the environment and
+/// never written anywhere, so no build ships pointed somewhere else.
+const FEED_OVERRIDE: &str = "FARM_LAUNCHER_UPDATE_FEED";
+
+/// Ask the feed, once.
+///
+/// Every failure here is quiet. A launcher that cannot reach the farm is a
+/// launcher somebody is using offline, and a dialog about it would be the app
+/// interrupting to say it has nothing to say.
+async fn look_once(app: &tauri::AppHandle) -> Result<Option<update::Ready>, String> {
+    use tauri_plugin_updater::UpdaterExt;
+    let mut builder = app.updater_builder();
+    if let Ok(feed) = std::env::var(FEED_OVERRIDE) {
+        let feed = feed.trim().to_string();
+        if !feed.is_empty() {
+            let url = feed
+                .parse::<tauri::Url>()
+                .map_err(|error| format!("{FEED_OVERRIDE} is not a URL: {error}."))?;
+            builder = builder
+                .endpoints(vec![url])
+                .map_err(|error| error.to_string())?;
+        }
+    }
+    let updater = builder.build().map_err(|error| error.to_string())?;
+    let found = updater.check().await.map_err(|error| error.to_string())?;
+    Ok(found.map(|update| update::Ready {
+        version: update.version.clone(),
+        notes: update.body.clone(),
+        date: update.date.map(|date| date.to_string()),
+    }))
+}
+
+/// One line in the launcher's own log, for the things that are deliberately
+/// not said out loud. A log that could not be written is not worth a second
+/// failure.
+fn note(app: &tauri::AppHandle, line: &str) {
+    use std::io::Write;
+    let dir = app.state::<Launcher>().engine.config_dir();
+    if std::fs::create_dir_all(&dir).is_err() {
+        return;
+    }
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.join("launcher.log"))
+    {
+        let _ = writeln!(file, "{line}");
+    }
+}
+
+/// Look now, and again every four hours for as long as the launcher is open.
+///
+/// Started once, from setup. The schedule itself is `update::next_wait`, which
+/// is tested; this is the loop that obeys it.
+fn watch_for_updates(app: tauri::AppHandle) {
+    // A plain thread that sleeps, rather than a timer on the async runtime.
+    // There is no tokio here to ask for one, and a thread asleep for four hours
+    // costs a stack and nothing else.
+    std::thread::spawn(move || {
+        let mut looks = 0u32;
+        loop {
+            let wait = update::next_wait(looks);
+            if !wait.is_zero() {
+                std::thread::sleep(wait);
+            }
+            looks = looks.saturating_add(1);
+            match tauri::async_runtime::block_on(look_once(&app)) {
+                Ok(Some(ready)) => {
+                    let dismissed = app
+                        .state::<Launcher>()
+                        .settings
+                        .lock()
+                        .ok()
+                        .and_then(|held| held.dismissed_update.clone());
+                    if let Ok(mut held) = app.state::<Launcher>().update_ready.lock() {
+                        *held = Some(ready.clone());
+                    }
+                    tray::refresh(&app);
+                    if update::worth_showing(&ready.version, dismissed.as_deref()) {
+                        let _ = app.emit(update::READY_EVENT, ready);
+                    }
+                }
+                Ok(None) => {}
+                Err(error) => note(&app, &format!("update check failed: {error}")),
+            }
+        }
+    });
+}
+
+/// What the last look found, for a window that opened after it happened.
+#[tauri::command]
+fn update_pending(app: tauri::State<'_, Launcher>) -> Option<update::Ready> {
+    let dismissed = app
+        .settings
+        .lock()
+        .ok()
+        .and_then(|held| held.dismissed_update.clone());
+    let found = app.update_ready.lock().ok().and_then(|held| held.clone())?;
+    update::worth_showing(&found.version, dismissed.as_deref()).then_some(found)
+}
+
+/// Not now. This version stays quiet; the next one asks again.
+#[tauri::command]
+fn update_dismiss(app: tauri::AppHandle, version: String) -> Result<(), String> {
+    let launcher = app.state::<Launcher>();
+    let held = launcher
+        .settings
+        .lock()
+        .map(|s| s.clone())
+        .unwrap_or_default();
+    let next = Settings {
+        dismissed_update: Some(version.trim().to_string()),
+        ..held
+    };
+    next.write(&launcher.engine.config_dir())?;
+    if let Ok(mut current) = launcher.settings.lock() {
+        *current = next;
+    }
+    tray::refresh(&app);
+    Ok(())
+}
+
+/// Download the newer launcher, install it, and start it again.
+///
+/// This one is loud when it fails, because somebody pressed a button and is
+/// waiting. A signature that does not verify arrives here as an error from the
+/// updater and is shown in words rather than being swallowed: an update whose
+/// signature is wrong is the one failure nobody should be able to click past.
+#[tauri::command]
+async fn update_install(app: tauri::AppHandle) -> Result<(), String> {
+    use tauri_plugin_updater::UpdaterExt;
+    let mut builder = app.updater_builder();
+    if let Ok(feed) = std::env::var(FEED_OVERRIDE) {
+        let feed = feed.trim().to_string();
+        if !feed.is_empty() {
+            let url = feed
+                .parse::<tauri::Url>()
+                .map_err(|error| format!("{FEED_OVERRIDE} is not a URL: {error}."))?;
+            builder = builder
+                .endpoints(vec![url])
+                .map_err(|error| error.to_string())?;
+        }
+    }
+    let updater = builder.build().map_err(|error| error.to_string())?;
+    let found = updater
+        .check()
+        .await
+        .map_err(|error| format!("The farm could not be asked about updates: {error}"))?;
+    let Some(update) = found else {
+        return Err("This is already the newest launcher.".into());
+    };
+
+    let total = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let so_far = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let sending = app.clone();
+    let counted = total.clone();
+    let got = so_far.clone();
+    update
+        .download_and_install(
+            move |chunk, length| {
+                if let Some(length) = length {
+                    counted.store(length, Ordering::Relaxed);
+                }
+                let done = got.fetch_add(chunk as u64, Ordering::Relaxed) + chunk as u64;
+                let whole = counted.load(Ordering::Relaxed);
+                // A feed with no length is a bar that cannot be drawn, so the
+                // page is told nothing rather than a made up fraction.
+                if whole > 0 {
+                    let fraction = (done as f64 / whole as f64).min(1.0);
+                    let _ = sending.emit(update::PROGRESS_EVENT, fraction);
+                }
+            },
+            || {},
+        )
+        .await
+        .map_err(|error| format!("The update could not be installed: {error}"))?;
+
+    // Everything the apps are doing is theirs; the launcher restarting does not
+    // stop them, the same as closing the window does not.
+    app.restart();
+}
+
 /// How many seeds each app on the screen has been given, and the pile that
 /// draws. Read from the farm rather than from the engine, and never waited on:
 /// the cards are already up by the time this answers.
@@ -1062,6 +1256,9 @@ pub fn run() {
             catalog_marks,
             card_seen,
             social_counts,
+            update_pending,
+            update_dismiss,
+            update_install,
             take_deep_link,
             open_external,
             open_app,
@@ -1089,6 +1286,7 @@ pub fn run() {
                 watch: Watch::default(),
                 snapshot: Mutex::new(None),
                 snapshot_moved: AtomicU64::new(0),
+                update_ready: Mutex::new(None),
             });
             apply_autostart(&handle, held.autostart);
 
@@ -1140,6 +1338,8 @@ pub fn run() {
             app.state::<Launcher>().watch.start(&handle);
 
             tray::build(&handle)?;
+            // Last, so that the first look never delays the window appearing.
+            watch_for_updates(handle.clone());
             Ok(())
         })
         .build(tauri::generate_context!())
