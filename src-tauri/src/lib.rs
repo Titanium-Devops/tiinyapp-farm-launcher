@@ -731,6 +731,14 @@ fn settings_read(app: tauri::State<'_, Launcher>) -> Settings {
 #[tauri::command]
 fn settings_write(app: tauri::AppHandle, next: Settings) -> Result<Settings, String> {
     let launcher = app.state::<Launcher>();
+    // The seen map belongs to the launcher, not to the copy of the settings the
+    // window happens to be holding. See Settings::from_window.
+    let held = launcher
+        .settings
+        .lock()
+        .map(|s| s.clone())
+        .unwrap_or_default();
+    let next = next.from_window(&held);
     next.write(&launcher.engine.config_dir())?;
     apply_autostart(&app, next.autostart);
     if let Ok(mut held) = launcher.settings.lock() {

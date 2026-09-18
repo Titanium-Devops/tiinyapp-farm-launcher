@@ -44,6 +44,22 @@ impl Settings {
             .unwrap_or_default()
     }
 
+    /// What to save when the window hands back settings it read earlier.
+    ///
+    /// The window shows four switches. It has never shown the seen map and has
+    /// no business deciding it, but it sends the whole struct back, from a copy
+    /// it read when it opened. The farm screen writes the seen map after that,
+    /// so believing the window's copy of it would throw away everything marked
+    /// seen the moment somebody touched a switch: the badges would come back
+    /// from the dead, or, worse, an app added in the meantime would be marked
+    /// seen in silence and never be New at all.
+    pub fn from_window(self, held: &Settings) -> Settings {
+        Settings {
+            seen: held.seen.clone(),
+            ..self
+        }
+    }
+
     pub fn write(&self, config_dir: &Path) -> Result<(), String> {
         std::fs::create_dir_all(config_dir)
             .map_err(|error| format!("The settings folder could not be made: {error}."))?;
@@ -93,6 +109,24 @@ mod tests {
         settings.write(&dir).unwrap();
         assert_eq!(Settings::read(&dir), settings);
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn the_settings_pane_cannot_throw_away_what_the_farm_screen_marked_seen() {
+        let held = Settings {
+            seen: Some(BTreeMap::from([("daybreak".into(), "0.1.0".into())])),
+            ..Settings::default()
+        };
+        // What the window sends back: the switches it shows, and a seen map it
+        // read before the farm screen had written one.
+        let from_the_window = Settings {
+            autostart: true,
+            seen: None,
+            ..Settings::default()
+        };
+        let saved = from_the_window.from_window(&held);
+        assert!(saved.autostart, "the switch the window changed is honoured");
+        assert_eq!(saved.seen, held.seen, "and the seen map is the launcher's");
     }
 
     #[test]
