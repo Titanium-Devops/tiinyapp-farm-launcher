@@ -219,57 +219,43 @@ jobs:
       # the signature is made here, by hand, over the final signed file. The
       # updater artifact on Windows IS the NSIS installer, so there is nothing
       # else to sign.
-      - name: Sign the final installer for the updater
+      # pwsh, not bash, and that is deliberate. CARGO_TARGET_DIR on this runner
+      # is an absolute Windows path with backslashes in it, and a backslash
+      # inside a bash glob is an escape character rather than a separator. The
+      # neighbouring steps that touch this directory are pwsh for the same
+      # reason, and a step that only ever runs on a push to main is the worst
+      # possible place to find that out.
+      - name: Sign the final installer for the updater, and check it
         if: steps.gate.outputs.updater == 'true'
-        shell: bash
+        shell: pwsh
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
-          set -eu
-          DIR="$CARGO_TARGET_DIR/release/bundle/nsis"
-          EXE=$(ls "$DIR"/*.exe | head -1)
+          $dir = "${{ env.CARGO_TARGET_DIR }}/release/bundle/nsis"
           # Nothing from the bundler should be lying around claiming to be this.
-          rm -f "$DIR"/*.exe.sig
-          npx tauri signer sign "$EXE"
-          test -s "$EXE.sig"
-          echo "signed $(basename "$EXE") for the updater"
-
-      # A signature over the wrong bytes is the failure that looks like success
-      # until somebody tries to update, so it is checked here against the very
-      # file that will be uploaded, with the public key the shipped app carries.
-      - name: The updater signature verifies against the bytes we will publish
-        if: steps.gate.outputs.updater == 'true'
-        shell: bash
-        run: |
-          set -eu
-          DIR="$CARGO_TARGET_DIR/release/bundle/nsis"
-          EXE=$(ls "$DIR"/*.exe | head -1)
-          node scripts/verify-updater-signature.mjs "$EXE" "$EXE.sig"
+          Remove-Item -Force -ErrorAction SilentlyContinue "$dir/*.exe.sig"
+          $exe = (Get-ChildItem "$dir/*.exe" | Select-Object -First 1).FullName
+          Write-Host "signing $exe"
+          npx tauri signer sign "$exe"
+          if ($LASTEXITCODE -ne 0) { throw "tauri signer sign failed" }
+          if (-not (Test-Path "$exe.sig")) { throw "no signature was written beside the installer" }
+          # A signature over the wrong bytes is the failure that looks like
+          # success until somebody tries to update, so it is checked here
+          # against the very file that will be uploaded, with the public key
+          # the shipped app carries.
+          node scripts/verify-updater-signature.mjs "$exe" "$exe.sig"
+          if ($LASTEXITCODE -ne 0) { throw "the updater signature does not match the signed installer" }
 
       - name: Write the feed fragment
         if: steps.gate.outputs.updater == 'true'
-        shell: bash
+        shell: pwsh
         run: |
-          set -eu
-          DIR="$CARGO_TARGET_DIR/release/bundle/nsis"
-          EXE=$(ls "$DIR"/*.exe | head -1)
-          node -e '
-            const fs = require("fs");
-            const path = require("path");
-            const [exe, sigfile] = process.argv.slice(1);
-            const version = require("./src-tauri/tauri.conf.json").version;
-            // One flat filename, the same rule the Mac fragments follow: the
-            // farm worker refuses any launcher key with a slash in it, and the
-            // version inside the name is what earns it a one year cache.
-            const name = path.basename(exe).replace(/[^A-Za-z0-9._-]+/g, "-");
-            const signature = fs.readFileSync(sigfile, "utf8").trim();
-            const url = `https://tiinyapp.farm/launcher/${name}`;
-            fs.mkdirSync("feed", { recursive: true });
-            fs.writeFileSync("feed/windows-x86_64.json",
-              JSON.stringify({ version, key: "windows-x86_64", signature, url }, null, 2) + "\n");
-          ' "$EXE" "$EXE.sig"
-          cat feed/windows-x86_64.json
+          $dir = "${{ env.CARGO_TARGET_DIR }}/release/bundle/nsis"
+          $exe = (Get-ChildItem "$dir/*.exe" | Select-Object -First 1).FullName
+          node scripts/write-feed-fragment.mjs windows-x86_64 "$exe"
+          if ($LASTEXITCODE -ne 0) { throw "the fragment was not written" }
+          Get-Content feed/windows-x86_64.json
 
       - name: The installer's size, measured rather than projected
         shell: bash
