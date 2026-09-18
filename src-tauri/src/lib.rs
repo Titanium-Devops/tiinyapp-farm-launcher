@@ -993,7 +993,7 @@ pub fn about_window(app: &tauri::AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-/// The app's own menu bar.
+/// The application menu, on macOS only.
 ///
 /// It exists for one item. macOS builds an About item into every application
 /// menu and wires it to a panel that says the name, the version and the
@@ -1005,6 +1005,13 @@ pub fn about_window(app: &tauri::AppHandle) -> tauri::Result<()> {
 /// macOS, and the one place anybody types into this app is the masked field the
 /// Tiiny's key is pasted into: no Edit menu, no paste, and no way in. **Window**
 /// is how Cmd+W closes the About window.
+///
+/// There is deliberately nothing here for Windows or Linux. Tauri only puts a
+/// default menu on macOS, so those two have never had one, and a menu set on
+/// them is drawn as a strip inside the window itself, above a page that already
+/// has its own header. On those two the About window is reached from the tray
+/// and from Settings, which is where they keep it anyway.
+#[cfg(target_os = "macos")]
 fn menubar(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
     use tauri::menu::{Menu, MenuItemBuilder, PredefinedMenuItem, Submenu};
 
@@ -1032,13 +1039,11 @@ fn menubar(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry
         &[
             &PredefinedMenuItem::minimize(app, None)?,
             &PredefinedMenuItem::maximize(app, None)?,
-            #[cfg(target_os = "macos")]
             &PredefinedMenuItem::separator(app)?,
             &PredefinedMenuItem::close_window(app, None)?,
         ],
     )?;
 
-    #[cfg(target_os = "macos")]
     {
         let app_menu = Submenu::with_items(
             app,
@@ -1069,22 +1074,6 @@ fn menubar(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry
         )?;
         let help = Submenu::with_items(app, "Help", true, &[])?;
         Menu::with_items(app, &[&app_menu, &file, &edit, &view, &window, &help])
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        // Windows and Linux have no application menu, so About lives where
-        // every other desktop app on those two puts it.
-        let file = Submenu::with_items(
-            app,
-            "File",
-            true,
-            &[
-                &PredefinedMenuItem::close_window(app, None)?,
-                &PredefinedMenuItem::quit(app, None)?,
-            ],
-        )?;
-        let help = Submenu::with_items(app, "Help", true, &[&about])?;
-        Menu::with_items(app, &[&file, &edit, &window, &help])
     }
 }
 
@@ -1448,15 +1437,20 @@ pub fn run() {
         ));
     }
 
-    builder
-        .menu(menubar)
-        // The only item this app puts on the menu bar of its own, and the
-        // reason the menu is built by hand at all.
-        .on_menu_event(|app, event| {
+    // The application menu is a macOS thing. See `menubar`.
+    #[cfg(target_os = "macos")]
+    {
+        builder = builder.menu(menubar);
+        // The only item this app puts on that menu of its own, and the reason
+        // the menu is built by hand at all.
+        builder = builder.on_menu_event(|app, event| {
             if event.id().0.as_str() == ABOUT {
                 let _ = about_window(app);
             }
-        })
+        });
+    }
+
+    builder
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())

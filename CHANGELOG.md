@@ -19,8 +19,9 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   The farm itself, and Titanium Bot beside it, the same pair the farm's own
   footer carries. The launcher's source on GitHub and the licence it is
   published under. Every one of them has its mark beside it, says in one line
-  what it is, and opens in your own browser rather than inside this app. It is
-  on the About item in the menu bar, in the menu bar icon's menu, and in
+  what it is, and opens in your own browser rather than inside this app. On a
+  Mac it is the About item in the application menu, which used to put up that
+  panel. Everywhere it is in the menu bar or tray icon's menu, and in
   Settings.
 - **Check for updates, on a button.** The launcher has looked for a newer
   version on its own since 0.1.2, when it opens and every four hours after.
