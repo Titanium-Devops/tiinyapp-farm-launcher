@@ -35,6 +35,7 @@ const farm = {
   shortBy: {},           // model id -> NPU units it is short by, decided in Rust
   marks: {},             // id -> { update, fresh }, the two corners, decided in Rust
   social: {},            // id -> { seeds, comments, stack }, the pile, decided in Rust
+  upgrade: null,         // { version, notes, date } when a newer launcher is waiting
   trouble: new Map(), // id -> { message, commentary }
   open: null,
 };
@@ -113,9 +114,19 @@ function seedStack(social) {
       pile.append(row);
     }
   }
+  // At zero the husk on its own is almost invisible against the art, and on a
+  // farm where nearly everything is at zero today that reads as a rendering
+  // fault rather than as an answer. So the words go beside it, in the same
+  // muted grey the chips use. From one seed up the pile speaks for itself, and
+  // from ten the number takes over.
+  const said = shape.kind === "none"
+    ? el("b", { class: "none", text: shape.words })
+    : shape.number === null || shape.number === undefined
+      ? null
+      : el("b", { text: String(shape.number) });
   return el("span", { class: `seeds ${shape.kind}`, role: "img", "aria-label": shape.words, title: shape.words },
     pile,
-    shape.number === null || shape.number === undefined ? null : el("b", { text: String(shape.number) }));
+    said);
 }
 
 function art(manifest, which) {
@@ -1031,6 +1042,69 @@ function readSocial() {
     .catch(() => { socialFor = ""; /* a card with no pile is still a card */ });
 }
 
+// The launcher's own update ----------------------------------------------
+//
+// Rust looks when the window opens and every four hours after, and says so with
+// one event. This draws the answer and nothing else: whether a version is worth
+// showing, and whether somebody already put this one away, was decided there.
+function renderUpgrade() {
+  const banner = $("update-banner");
+  banner.hidden = !farm.upgrade;
+  if (!farm.upgrade) return;
+  $("update-line").textContent = `Tiiny App Farm ${farm.upgrade.version} is ready.`;
+  // The notes are whatever the release said about itself, and a release that
+  // said nothing gets no empty line under the sentence.
+  $("update-notes").textContent = farm.upgrade.notes || "";
+  $("update-notes").hidden = !farm.upgrade.notes;
+}
+
+let upgrading = false;
+function upgradeProgress(fraction) {
+  const bar = $("update-bar");
+  bar.hidden = false;
+  $("update-bar-fill").style.width = `${Math.round(Math.min(Math.max(fraction, 0), 1) * 100)}%`;
+}
+
+$("update-go").addEventListener("click", async () => {
+  if (!farm.upgrade || upgrading) return;
+  upgrading = true;
+  const button = $("update-go");
+  button.disabled = true;
+  button.textContent = "Downloading";
+  $("update-later").disabled = true;
+  upgradeProgress(0);
+  try {
+    // This does not come back when it works: the launcher installs the new one
+    // and starts it again, so the next thing anybody sees is a new window.
+    await invoke("update_install");
+  } catch (error) {
+    // A signature that does not verify arrives here. It is said out loud rather
+    // than retried, because an update whose signature is wrong is the one
+    // failure nobody should be able to click past.
+    upgrading = false;
+    button.disabled = false;
+    button.textContent = "Update and restart";
+    $("update-later").disabled = false;
+    $("update-bar").hidden = true;
+    say(sentence(error));
+  }
+});
+
+$("update-later").addEventListener("click", async () => {
+  if (!farm.upgrade) return;
+  const version = farm.upgrade.version;
+  farm.upgrade = null;
+  renderUpgrade();
+  try {
+    await invoke("update_dismiss", { version });
+  } catch (error) {
+    say(sentence(error));
+  }
+});
+
+listen("update:ready", (event) => { farm.upgrade = event.payload; renderUpgrade(); });
+listen("update:progress", (event) => { if (upgrading) upgradeProgress(event.payload); });
+
 // Reading everything again ------------------------------------------------
 async function refresh() {
   try {
@@ -1092,6 +1166,9 @@ listen("deep-link:install", (event) => { show("farm"); openCard(event.payload); 
   farm.info = await invoke("launcher_info");
   farm.settings = await invoke("settings_read");
   invoke("models_watch");
+  // The first look happens as the window is being built, so its event can beat
+  // this listener. Asking once covers that race.
+  try { farm.upgrade = await invoke("update_pending"); renderUpgrade(); } catch { /* no banner */ }
   await refresh();
   const waiting = await invoke("take_deep_link");
   if (waiting) { show("farm"); openCard(waiting); }

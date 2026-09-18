@@ -10,9 +10,9 @@
 // made, refuses anything that is not what it claims to be, and puts the files
 // in the farm's R2 bucket under launcher/.
 //
-// Two workflows, so two runs: macos.yml and windows.yml both have to have
-// succeeded for the same commit. A macOS release without the Windows installer
-// is a release half the people who click Download cannot use.
+// Three workflows, so three runs: macos.yml, windows.yml and linux.yml all have
+// to have succeeded for the same commit. A macOS release without the Windows
+// installer is a release half the people who click Download cannot use.
 //
 // KEYS ARE FLAT. The farm's worker serves GET /launcher/<file> out of
 // launcher/<file> in R2, and launcherType() in its worker/main.mjs refuses any
@@ -30,6 +30,12 @@
 // latest.json goes last. It is the file every installed launcher reads, and a
 // feed naming a download that is not there yet turns all of them into launchers
 // that cannot update.
+//
+// latest.json arrives half made. macos.yml writes the two darwin rows, because
+// both Mac architectures come out of that one workflow; the windows-x86_64 and
+// linux-x86_64 rows are folded in here, which is the first place that has all
+// three runs' files together. Every row's signature is verified against the
+// exact bytes about to be uploaded, not against what a workflow said.
 //
 // What it cannot check, and says so rather than implying otherwise: the
 // Authenticode signature on the Windows installer, which only Windows can
@@ -272,6 +278,55 @@ for (const tarball of tarballs) log(`updater  ${path.basename(tarball)}`);
 // --- Put them where people download them ---------------------------------
 const versioned = (file) => flatten(path.basename(file));
 
+// --- Windows and Linux into the same feed --------------------------------
+//
+// The Mac half of latest.json is assembled inside macos.yml, because both Mac
+// architectures come out of that one workflow and a feed naming one of them is
+// a feed that silently never updates the other. Windows and Linux are separate
+// workflows and cannot see each other's artifacts, so their rows are folded in
+// here, which is the first place that has all three runs in one directory.
+//
+// Every row is checked against the file this script is about to upload rather
+// than against what the workflow said, because the signature being over the
+// wrong bytes is the whole failure this is guarding: on Windows, Authenticode
+// rewrites the installer after the bundler has seen it.
+const foldIn = (key, artifact, platform) => {
+  const fragment = files.find((f) => path.basename(f) === `${key}.json`);
+  if (!fragment) {
+    log(`feed     ${key} has no fragment, so installed ${platform} copies will not update themselves`);
+    return;
+  }
+  const piece = JSON.parse(fs.readFileSync(fragment, "utf8"));
+  if (piece.version !== version) {
+    die(`The ${key} fragment names ${piece.version} and this checkout is ${version}.`);
+  }
+  const sig = `${artifact}.sig`;
+  if (!fs.existsSync(sig)) {
+    die(`${key}.json claims a signature and there is none beside ${path.basename(artifact)}.`);
+  }
+  if (fs.readFileSync(sig, "utf8").trim() !== String(piece.signature).trim()) {
+    die(`The signature in the ${key} fragment is not the one beside ${path.basename(artifact)}.`);
+  }
+  const named = `${SITE}/launcher/${versioned(artifact)}`;
+  if (piece.url !== named) {
+    die(`The ${key} fragment points at ${piece.url} and this run will upload ${named}.`);
+  }
+  try {
+    run("node", [path.join(here, "verify-updater-signature.mjs"), artifact, sig], { stdio: "pipe" });
+  } catch (error) {
+    die(
+      `The ${key} signature does not belong to the bytes about to be published.\n` +
+      `${(error.stdout || "") + (error.stderr || "")}`,
+    );
+  }
+  answer.platforms[key] = { signature: piece.signature, url: piece.url };
+  log(`feed     ${key} -> ${path.basename(artifact)}, signature verifies against these bytes`);
+};
+foldIn("windows-x86_64", installer, "Windows");
+foldIn("linux-x86_64", appImage, "Linux");
+fs.writeFileSync(feed, JSON.stringify(answer, null, 2) + "\n");
+log(`feed     latest.json names ${Object.keys(answer.platforms).join(", ")}`);
+
 // What the release history will say about each file. The versioned name is the
 // one that goes in it, because a stable name is overwritten by the next release
 // and a history that points at stable names is a history of one release.
@@ -287,6 +342,13 @@ const uploads = [
   ...Object.values(shipped).map(({ file }) => ({ file, key: `${PREFIX}${versioned(file)}` })),
   ...tarballs.map((f) => ({ file: f, key: `${PREFIX}${path.basename(f)}` })),
   ...tarballs.map((f) => ({ file: `${f}.sig`, key: `${PREFIX}${path.basename(f)}.sig` })),
+  // The Windows installer and the AppImage are their own updater artifacts, so
+  // the versioned name the feed points at is already being uploaded above; only
+  // the signature beside it is new. Uploaded for the same reason the Mac ones
+  // are: somebody checking a download by hand can then check the signature too.
+  ...[installer, appImage]
+    .filter((f) => fs.existsSync(`${f}.sig`))
+    .map((f) => ({ file: `${f}.sig`, key: `${PREFIX}${versioned(f)}.sig` })),
   // Stable, no version, what the download buttons point at. Five minute cache.
   { file: arm, key: `${PREFIX}${STABLE_MAC}` },
   { file: intel, key: `${PREFIX}${STABLE_MAC_INTEL}` },

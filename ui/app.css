@@ -92,6 +92,20 @@ main { padding: 24px 20px 40px; max-width: 1180px; margin: 0 auto }
 .chip.warm { color: var(--hay); border-color: #3b3320 }
 .chip.bad { color: var(--bad); border-color: #46281f }
 
+/* The launcher's own update ------------------------------------------
+   Warm, quiet and one line, in the same hay as the Update available badge
+   on a card, because it is the same idea about the app itself. */
+.upgrade {
+  display: flex; gap: 16px; align-items: center; flex-wrap: wrap;
+  border: 1px solid #3b3320; background: #17140c; border-radius: 14px;
+  padding: 14px 18px; margin: 0 0 18px;
+}
+.upgrade .upgrade-said { display: grid; gap: 3px; flex: 1; min-width: 240px }
+.upgrade strong { font: 700 15px var(--body); color: var(--hay) }
+.upgrade span { color: var(--mute); font-size: 13px }
+.upgrade .upgrade-act { display: flex; gap: 8px; align-items: center; flex-wrap: wrap }
+.upgrade .bar { flex-basis: 100% }
+
 /* The banner that asks for a Tiiny ------------------------------------ */
 .banner {
   background: linear-gradient(135deg, #1A2230, #10161E);
@@ -155,6 +169,9 @@ main { padding: 24px 20px 40px; max-width: 1180px; margin: 0 auto }
    footer. This bit somebody already, in this exact place. */
 .seeds .seed.hollow { background: none; border: 1px solid #6b5a38; transform: none; border-radius: 999px; height: 6px }
 .seeds b { font: 800 12px var(--body); color: var(--hay); line-height: 1 }
+/* No seeds yet, in the same grey and weight as the chips beside it, because it
+   is an answer rather than a number. */
+.seeds b.none { font: 400 12px var(--body); color: var(--mute) }
 
 /* A row in the Running pane ------------------------------------------- */
 .rows { display: grid; gap: 12px }

@@ -138,6 +138,7 @@ jobs:
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          UPDATER_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         shell: bash
         run: |
           on_main='${{ github.ref == 'refs/heads/main' }}'
@@ -154,7 +155,15 @@ jobs:
           [ -n "$AZURE_SUBSCRIPTION_ID" ] || missing="$missing AZURE_SUBSCRIPTION_ID"
           if [ "$on_main" = "true" ] && [ -z "$missing" ]; then sign=true; fi
           echo "sign=$sign" >> "$GITHUB_OUTPUT"
-          echo "sign=$sign on_main=$on_main missing=${missing:-none}"
+          # The updater signature is made after Authenticode, over the signed
+          # bytes, so it needs the Tauri key as well as a signed installer.
+          updater=false
+          if [ "$sign" = "true" ] && [ -n "$UPDATER_KEY" ]; then updater=true; fi
+          echo "updater=$updater" >> "$GITHUB_OUTPUT"
+          echo "sign=$sign updater=$updater on_main=$on_main missing=${missing:-none}"
+          if [ "$sign" = "true" ] && [ "$updater" != "true" ]; then
+            echo "::notice::No Windows updater signature. TAURI_SIGNING_PRIVATE_KEY is not set, so latest.json will carry no windows-x86_64 row and installed Windows copies will not update themselves."
+          fi
           if [ "$sign" != "true" ] && [ -n "$missing" ]; then
             echo "::notice::Building UNSIGNED because these are not set:$missing. The installer will build and upload; it will not carry an Authenticode signature."
           elif [ "$sign" != "true" ]; then
@@ -199,6 +208,55 @@ jobs:
           $sig.SignerCertificate | Format-List Subject, NotBefore, NotAfter
           if ($sig.Status -ne 'Valid') { exit 1 }
 
+      # ORDER MATTERS, AND IT IS THE WHOLE POINT OF THIS STEP.
+      #
+      # Authenticode rewrites the installer: the certificate goes into the PE
+      # file and every byte after the checksum moves. A Tauri updater signature
+      # made at bundle time is a signature over the file as it was BEFORE that,
+      # so it verifies against bytes nobody will ever download, and every
+      # Windows update fails with a signature error that looks like the key is
+      # wrong. So the installer is not built with createUpdaterArtifacts at all;
+      # the signature is made here, by hand, over the final signed file. The
+      # updater artifact on Windows IS the NSIS installer, so there is nothing
+      # else to sign.
+      # pwsh, not bash, and that is deliberate. CARGO_TARGET_DIR on this runner
+      # is an absolute Windows path with backslashes in it, and a backslash
+      # inside a bash glob is an escape character rather than a separator. The
+      # neighbouring steps that touch this directory are pwsh for the same
+      # reason, and a step that only ever runs on a push to main is the worst
+      # possible place to find that out.
+      - name: Sign the final installer for the updater, and check it
+        if: steps.gate.outputs.updater == 'true'
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          $dir = "${{ env.CARGO_TARGET_DIR }}/release/bundle/nsis"
+          # Nothing from the bundler should be lying around claiming to be this.
+          Remove-Item -Force -ErrorAction SilentlyContinue "$dir/*.exe.sig"
+          $exe = (Get-ChildItem "$dir/*.exe" | Select-Object -First 1).FullName
+          Write-Host "signing $exe"
+          npx tauri signer sign "$exe"
+          if ($LASTEXITCODE -ne 0) { throw "tauri signer sign failed" }
+          if (-not (Test-Path "$exe.sig")) { throw "no signature was written beside the installer" }
+          # A signature over the wrong bytes is the failure that looks like
+          # success until somebody tries to update, so it is checked here
+          # against the very file that will be uploaded, with the public key
+          # the shipped app carries.
+          node scripts/verify-updater-signature.mjs "$exe" "$exe.sig"
+          if ($LASTEXITCODE -ne 0) { throw "the updater signature does not match the signed installer" }
+
+      - name: Write the feed fragment
+        if: steps.gate.outputs.updater == 'true'
+        shell: pwsh
+        run: |
+          $dir = "${{ env.CARGO_TARGET_DIR }}/release/bundle/nsis"
+          $exe = (Get-ChildItem "$dir/*.exe" | Select-Object -First 1).FullName
+          node scripts/write-feed-fragment.mjs windows-x86_64 "$exe"
+          if ($LASTEXITCODE -ne 0) { throw "the fragment was not written" }
+          Get-Content feed/windows-x86_64.json
+
       - name: The installer's size, measured rather than projected
         shell: bash
         run: ls -l "${{ env.CARGO_TARGET_DIR }}"/release/bundle/nsis/*.exe
@@ -224,5 +282,7 @@ jobs:
           name: tiinyapp-farm-launcher-windows-installer
           path: |
             ${{ env.CARGO_TARGET_DIR }}/release/bundle/nsis/*.exe
+            ${{ env.CARGO_TARGET_DIR }}/release/bundle/nsis/*.exe.sig
             ${{ env.CARGO_TARGET_DIR }}/release/bundle/nsis/SHA256SUMS
+            feed/windows-x86_64.json
           if-no-files-found: error

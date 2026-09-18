@@ -11,6 +11,7 @@
     "build": "tauri build"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2"
+    "@tauri-apps/cli": "^2",
+    "jsdom": "^23.2.0"
   }
 }

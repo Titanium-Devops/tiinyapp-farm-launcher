@@ -107,6 +107,54 @@ jobs:
           fi
           echo "the AppImage is an executable ELF of $SIZE bytes"
 
+      # The same order as Windows, and for a simpler reason: nothing rewrites
+      # an AppImage after it is built, but signing the final file rather than
+      # asking the bundler to do it keeps one rule across all three platforms,
+      # which is that the signature is made over the bytes that get uploaded.
+      # No key, no signature, and no linux-x86_64 row in the feed: an installed
+      # Linux copy then just never sees an update, which is where it was before.
+      # A gate step rather than `if: env.UPDATER_KEY != ''` on the steps
+      # themselves. A step's own `env:` is NOT in scope for its own `if:`, so
+      # that spelling reads an empty string every time and the step never runs:
+      # green, silent, and no linux-x86_64 row in the feed for anybody to
+      # notice. The other two workflows decide the same way, in a step.
+      - name: Decide whether this run can sign for the updater
+        id: gate
+        env:
+          UPDATER_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          set -eu
+          updater=false
+          if [ -n "${UPDATER_KEY:-}" ]; then updater=true; fi
+          echo "updater=$updater" >> "$GITHUB_OUTPUT"
+          echo "updater=$updater"
+          if [ "$updater" != "true" ]; then
+            echo "::notice::No Linux updater signature. TAURI_SIGNING_PRIVATE_KEY is not set, so latest.json will carry no linux-x86_64 row and an installed AppImage will not update itself."
+          fi
+
+      - name: Sign the AppImage for the updater, and check it
+        if: steps.gate.outputs.updater == 'true'
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -eu
+          DIR=src-tauri/target/release/bundle/appimage
+          APP=$(ls "$DIR"/*.AppImage | head -1)
+          rm -f "$DIR"/*.AppImage.sig
+          npx tauri signer sign "$APP"
+          test -s "$APP.sig"
+          node scripts/verify-updater-signature.mjs "$APP" "$APP.sig"
+
+      - name: Write the feed fragment
+        if: steps.gate.outputs.updater == 'true'
+        run: |
+          set -eu
+          DIR=src-tauri/target/release/bundle/appimage
+          APP=$(ls "$DIR"/*.AppImage | head -1)
+          node scripts/write-feed-fragment.mjs linux-x86_64 "$APP"
+          cat feed/linux-x86_64.json
+
       # What the bytes are, written by the machine that made them, so whatever
       # publishes them later has something to compare against. Same shape as the
       # other two platforms write.
@@ -123,5 +171,7 @@ jobs:
           name: tiinyapp-farm-launcher-linux-appimage
           path: |
             src-tauri/target/release/bundle/appimage/*.AppImage
+            src-tauri/target/release/bundle/appimage/*.AppImage.sig
             src-tauri/target/release/bundle/appimage/SHA256SUMS
+            feed/linux-x86_64.json
           if-no-files-found: error

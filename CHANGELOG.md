@@ -25,6 +25,17 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   outline where nobody has given one yet, then the seeds themselves, and from
   ten up a full pile with the number. It is read once per look at the farm and
   never holds the cards back.
+- **The launcher updates itself.** It looks for a newer version when you open
+  it and every four hours it stays open. When one is waiting, a quiet strip at
+  the top of the farm says so, with one button that downloads it, installs it
+  and starts the new one. Not now puts that version away for good; the one
+  after it asks again. The menu bar carries the same line. A launcher that
+  cannot reach the farm says nothing at all rather than interrupting you about
+  it.
+- **Windows and Linux can update themselves too**, not only macOS. Every
+  platform's update carries a signature that is checked before anything is
+  installed, and an update whose signature is not ours is refused and says so
+  rather than being installed quietly.
 
 ### Known limits
 
@@ -32,6 +43,15 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   on tiinyapp.farm; a later version brings it into the window.
 - The count comes from the farm, so a launcher with no network draws the cards
   with no piles on them rather than waiting.
+- **A real self-update is first proven at 0.1.3.** This is the release that
+  adds the mechanism, so the newest version the feed can offer it is itself.
+  What has been proven here is every part that can be: the banner, the refusal
+  of an update signed with the wrong key, and that each platform's signature
+  belongs to the exact file published. The download and restart on a real
+  release is witnessed at the next one.
+- Nobody on this team has yet run the Linux AppImage on a Linux desktop, so its
+  self-update is signed and verified but unexercised, the same as the AppImage
+  itself has always been.
 
 ## 0.1.1 - 2026-09-15
 

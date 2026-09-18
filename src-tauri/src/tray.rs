@@ -90,8 +90,21 @@ fn port_in(url: &str) -> Option<u16> {
     url.rsplit(':').next()?.split('/').next()?.parse().ok()
 }
 
-fn menu<R: Runtime>(app: &AppHandle<R>, rows: &[Row]) -> tauri::Result<Menu<R>> {
+fn menu<R: Runtime>(
+    app: &AppHandle<R>,
+    rows: &[Row],
+    waiting: Option<&str>,
+) -> tauri::Result<Menu<R>> {
     let mut builder = MenuBuilder::new(app);
+    // The launcher's own update, above everything else, because it is about the
+    // app somebody is looking at rather than about one of the things it runs.
+    if let Some(version) = waiting {
+        builder = builder.item(
+            &MenuItemBuilder::with_id("launcher-update", crate::update::tray_line(version))
+                .build(app)?,
+        );
+        builder = builder.item(&PredefinedMenuItem::separator(app)?);
+    }
     if rows.is_empty() {
         builder = builder.item(
             &MenuItemBuilder::with_id("nothing", "Nothing is running")
@@ -132,7 +145,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
     let tray = TrayIconBuilder::with_id(ID)
         .tooltip("Tiiny App Farm")
         .icon_as_template(true)
-        .menu(&menu(app, &[])?)
+        .menu(&menu(app, &[], None)?)
         .on_menu_event(|app, event| on_menu(app, event.id().0.as_str()))
         .on_tray_icon_event(|tray, event| {
             if let TrayIconEvent::DoubleClick { .. } = event {
@@ -166,7 +179,18 @@ pub fn refresh(app: &AppHandle) {
             Ok(Ok(value)) => rows_from(&value),
             _ => Vec::new(),
         };
-        if let (Some(tray), Ok(menu)) = (handle.tray_by_id(ID), menu(&handle, &rows)) {
+        // What the launcher has found waiting for itself, which the banner in
+        // the window is showing at the same time and for the same reason.
+        let waiting = handle
+            .state::<Launcher>()
+            .update_ready
+            .lock()
+            .ok()
+            .and_then(|held| held.as_ref().map(|ready| ready.version.clone()));
+        if let (Some(tray), Ok(menu)) = (
+            handle.tray_by_id(ID),
+            menu(&handle, &rows, waiting.as_deref()),
+        ) {
             let _ = TrayIcon::set_menu(&tray, Some(menu));
         }
     });
@@ -175,6 +199,9 @@ pub fn refresh(app: &AppHandle) {
 fn on_menu(app: &AppHandle, id: &str) {
     match id {
         "show" => crate::raise(app),
+        // The menu bar says an update is ready; the window is where it is
+        // taken, because that is where the notes and the progress bar are.
+        "launcher-update" => crate::raise(app),
         "quit" => app.exit(0),
         other => {
             let Some((verb, ident)) = other.split_once(':') else {
