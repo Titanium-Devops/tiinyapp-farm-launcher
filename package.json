@@ -1,6 +1,6 @@
 {
   "name": "tiinyapp-farm-launcher",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
   "description": "The Tiiny App Farm launcher",
   "type": "module",

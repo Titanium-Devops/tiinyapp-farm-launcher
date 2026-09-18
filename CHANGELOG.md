@@ -7,6 +7,17 @@ the diff.
 
 This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.1.3 - 2026-09-18
+
+### Changed
+
+- **This release exists to prove the updater.** 0.1.2 added the mechanism that
+  looks for a newer version and offers to update and restart, but the newest
+  version its feed could offer was itself. 0.1.3 is the first version a 0.1.2
+  launcher can see, download, verify and install on its own. Nothing else has
+  changed. If your launcher put up "Tiiny App Farm 0.1.3 is ready" and came back
+  as 0.1.3, the updater works.
+
 ## 0.1.2 - 2026-09-18
 
 ### Added
