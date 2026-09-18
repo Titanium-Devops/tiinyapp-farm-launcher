@@ -138,9 +138,8 @@ fn menu<R: Runtime>(
     // The same window the menu bar's About item opens, because the menu bar is
     // the whole app when the window is closed and this is where somebody looking
     // for what version they have would go.
-    builder = builder.item(
-        &MenuItemBuilder::with_id(crate::ABOUT, "About Tiiny App Farm").build(app)?,
-    );
+    builder =
+        builder.item(&MenuItemBuilder::with_id(crate::ABOUT, "About Tiiny App Farm").build(app)?);
     builder = builder.item(&PredefinedMenuItem::separator(app)?);
     builder = builder.item(&MenuItemBuilder::with_id("quit", "Quit").build(app)?);
     builder.build()

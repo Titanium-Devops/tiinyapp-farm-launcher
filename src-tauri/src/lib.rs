@@ -1055,8 +1055,18 @@ fn menubar(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry
                 &PredefinedMenuItem::quit(app, None)?,
             ],
         )?;
-        let file = Submenu::with_items(app, "File", true, &[&PredefinedMenuItem::close_window(app, None)?])?;
-        let view = Submenu::with_items(app, "View", true, &[&PredefinedMenuItem::fullscreen(app, None)?])?;
+        let file = Submenu::with_items(
+            app,
+            "File",
+            true,
+            &[&PredefinedMenuItem::close_window(app, None)?],
+        )?;
+        let view = Submenu::with_items(
+            app,
+            "View",
+            true,
+            &[&PredefinedMenuItem::fullscreen(app, None)?],
+        )?;
         let help = Submenu::with_items(app, "Help", true, &[])?;
         Menu::with_items(app, &[&app_menu, &file, &edit, &view, &window, &help])
     }
@@ -1100,13 +1110,15 @@ fn open_log(app: tauri::AppHandle) -> Result<String, String> {
     let path = app.state::<Launcher>().engine.config_dir().join(LOG);
     if !path.is_file() {
         return Err(
-            "The launcher has not had to write anything down yet, so there is no log."
-                .to_string(),
+            "The launcher has not had to write anything down yet, so there is no log.".to_string(),
         );
     }
-    app.opener()
-        .reveal_item_in_dir(&path)
-        .map_err(|error| format!("The log is at {} and would not open: {error}.", path.display()))?;
+    app.opener().reveal_item_in_dir(&path).map_err(|error| {
+        format!(
+            "The log is at {} and would not open: {error}.",
+            path.display()
+        )
+    })?;
     Ok(path.display().to_string())
 }
 
@@ -1598,7 +1610,6 @@ mod tests {
         assert!(!opens("file:///etc/passwd"));
         assert!(!opens(""));
     }
-
 
     #[test]
     fn an_install_link_names_one_app() {
