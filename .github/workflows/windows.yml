@@ -17,7 +17,7 @@ env:
 jobs:
   test:
     name: cargo test (windows)
-    runs-on: windows-latest
+    runs-on: blacksmith-4vcpu-windows-2025
     steps:
       - uses: actions/checkout@v4
 
@@ -59,7 +59,7 @@ jobs:
 
   installer:
     name: Windows installer (NSIS, x64, signed)
-    runs-on: windows-latest
+    runs-on: blacksmith-4vcpu-windows-2025
     permissions:
       id-token: write # GitHub OIDC token for the azure/login federated credential
       contents: read

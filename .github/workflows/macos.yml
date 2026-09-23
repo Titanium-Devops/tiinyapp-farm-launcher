@@ -18,7 +18,7 @@ env:
 jobs:
   test:
     name: cargo test (macos)
-    runs-on: macos-latest
+    runs-on: blacksmith-6vcpu-macos-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -87,7 +87,7 @@ jobs:
 
   bundle:
     name: macOS app (${{ matrix.arch }}, signed and notarised)
-    runs-on: macos-latest
+    runs-on: blacksmith-6vcpu-macos-latest
     strategy:
       fail-fast: false
       matrix:
@@ -502,7 +502,7 @@ jobs:
 
   feed:
     name: latest.json
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     needs: bundle
     if: github.ref == 'refs/heads/main'
     steps:
