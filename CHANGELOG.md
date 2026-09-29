@@ -7,6 +7,22 @@ the diff.
 
 This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.1.5 - 2026-09-29
+
+### Added
+
+- **Give an app a seed from its card.** Paste a farm token once in Settings,
+  then give or take back your seed without leaving the launcher. The card
+  keeps the same seed pile and count as the farm.
+- **Read and leave comments from the launcher.** An app's card carries its
+  conversation and a comment box. The launcher explains when the account
+  needs a verified Tiiny, when the hourly limit resets, and when a token is no
+  longer accepted.
+- **A farm account in Settings.** The token is saved separately with
+  owner-only permissions, is never shown again, and can be removed with Sign
+  out. Every request and the bearer header stay in Rust rather than entering
+  the page.
+
 ## 0.1.4 - 2026-09-18
 
 ### Added

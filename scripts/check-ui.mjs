@@ -50,6 +50,7 @@ const ANSWERS = {
     catalog: "https://tiinyapp.farm/manifests/",
   },
   settings_read: { autostart: false, farmOnPath: false, manualBase: null, openInBrowser: false },
+  farm_account_status: { configured: false, label: null },
   farm_list: { catalog: [], installed: [] },
   farm_status: { running: [] },
   device_current: { configured: true, base: "http://openai.api.tiiny/v1" },
@@ -95,6 +96,7 @@ window.__TAURI__ = {
     },
   },
 };
+window.__FARM_UI_TEST__ = {};
 
 window.eval(fs.readFileSync(path.join(ui, "app.js"), "utf8"));
 
@@ -162,6 +164,38 @@ ok("and tells Rust which version to keep quiet about", dismissed && dismissed.ar
 $("settings-about").dispatchEvent(new window.Event("click"));
 await settle();
 ok("Settings opens the About window", asked.some((a) => a.name === "about_open"));
+
+process.stdout.write("\nthe farm account and conversation\n");
+window.__FARM_UI_TEST__.openSocial(
+  { id: "story-lantern", name: "Story Lantern", pitch: "A story", version: "1.0.0", release: "ready" },
+  { id: "story-lantern", name: "Story Lantern", pitch: "A story", description: "A story", version: "1.0.0", license: "MIT", entry: null, requires: {}, permissions: [] });
+await settle();
+ok("a signed-out seed action points to Settings",
+  $("card-seed-action").textContent.includes("Sign in with a farm token in Settings") &&
+  $("card-seed-action").textContent.includes("Open Settings"));
+ok("a signed-out comment action says the same thing",
+  $("card-comment-action").textContent.includes("Sign in with a farm token in Settings"));
+
+window.__FARM_UI_TEST__.signedIn(
+  { seeds: 3, mine: false, comments: [], stack: { kind: "seeds", rows: [3], number: null, words: "3 seeds" } });
+window.__FARM_UI_TEST__.socialReply(
+  { state: "unverified", message: "Comments need a verified Tiiny on your farm account.", social: null });
+ok("an unverified account gets the required explanation",
+  $("card-comment-action").textContent.includes("Comments need a verified Tiiny on your farm account"));
+ok("and a door to the farm account",
+  $("card-comment-action").textContent.includes("Open farm account"));
+
+window.__FARM_UI_TEST__.socialReply(
+  { state: "rateLimited", message: "Try again in one hour.", social: null });
+ok("a rate limit says when to try again",
+  $("card-comment-action").textContent.includes("Try again in one hour"));
+
+window.__FARM_UI_TEST__.socialReply(
+  { state: "signedOut", message: "Sign in with a farm token in Settings to give seeds and comment.", social: null });
+ok("a 401 state clears signed in",
+  $("farm-account-status").textContent === "No farm token is saved.");
+ok("and puts the sign-in line back on the card",
+  $("card-seed-action").textContent.includes("Sign in with a farm token in Settings"));
 
 // The page keeps an eight second poll running and jsdom keeps a frame loop, so
 // the process would sit here for ever waiting for a window nobody is looking
