@@ -35,6 +35,10 @@ const farm = {
   shortBy: {},           // model id -> NPU units it is short by, decided in Rust
   marks: {},             // id -> { update, fresh }, the two corners, decided in Rust
   social: {},            // id -> { seeds, comments, stack }, the pile, decided in Rust
+  account: { configured: false, label: null },
+  conversations: new Map(), // id -> { seeds, mine, comments, stack }
+  socialTrouble: new Map(), // id -> { state, message }
+  socialWorking: new Set(),
   upgrade: null,         // { version, notes, date } when a newer launcher is waiting
   trouble: new Map(), // id -> { message, commentary }
   open: null,
@@ -76,6 +80,13 @@ function show(view) {
     $(`view-${name}`).hidden = name !== view;
     document.querySelector(`nav button[data-view="${name}"]`).setAttribute("aria-pressed", String(name === view));
   }
+}
+
+function openFarmSettings() {
+  show("settings");
+  const field = $("farm-account-settings");
+  field.scrollIntoView({ block: "start", behavior: "smooth" });
+  if (!farm.account.configured) $("farm-token").focus();
 }
 for (const button of document.querySelectorAll("nav button")) {
   button.addEventListener("click", () => { show(button.dataset.view); reread(); });
@@ -274,7 +285,9 @@ async function openCard(id) {
   $("card-description").textContent = "";
   $("card-icon").src = "farm-mark.png";
   renderCardState();
+  renderCardSocial();
   if (!dialog.open) dialog.showModal();
+  readCardSocial(id);
 
   let manifest = farm.manifests.get(id);
   if (!manifest) {
@@ -300,6 +313,134 @@ async function openCard(id) {
   $("card-needs").textContent = needsSentence(manifest);
   $("card-permissions").textContent = permissionsSentence(manifest);
   renderCardState();
+}
+
+function socialSignInLine() {
+  return el("div", { class: "social-auth" },
+    el("span", { text: "Sign in with a farm token in Settings to give seeds and comment" }),
+    el("button", { class: "btn ghost small", type: "button", onclick: openFarmSettings, text: "Open Settings" }));
+}
+
+function socialProblem(problem) {
+  if (!problem) return null;
+  if (problem.state === "signedOut") return socialSignInLine();
+  const line = el("div", { class: "social-auth" }, el("span", { class: "social-error", text: problem.message }));
+  if (problem.state === "unverified") {
+    line.append(el("button", { class: "btn ghost small", type: "button", onclick: () => invoke("open_external", { url: `${farm.info.site}/account/` }), text: "Open farm account" }));
+  }
+  return line;
+}
+
+function commentWhen(at) {
+  const time = new Date(at);
+  return Number.isNaN(time.valueOf()) ? "" : time.toLocaleString();
+}
+
+function renderCardSocial() {
+  const id = farm.open;
+  if (!id) return;
+  const seedAction = $("card-seed-action");
+  const commentList = $("card-comments");
+  const commentAction = $("card-comment-action");
+  const count = $("card-seed-count");
+  seedAction.replaceChildren();
+  commentList.replaceChildren();
+  commentAction.replaceChildren();
+  count.replaceChildren();
+
+  if (!farm.account.configured) {
+    const line = socialSignInLine();
+    seedAction.append(line);
+    commentAction.append(socialSignInLine());
+    return;
+  }
+
+  const conversation = farm.conversations.get(id);
+  const problem = farm.socialTrouble.get(id);
+  const working = farm.socialWorking.has(id);
+  if (conversation) {
+    count.append(seedStack(conversation));
+    seedAction.append(el("button", {
+      class: conversation.mine ? "btn ghost" : "btn",
+      type: "button",
+      disabled: working,
+      onclick: () => toggleSeed(id),
+      text: conversation.mine ? "Seed given" : "Give a seed",
+    }));
+    const comments = el("div", { class: "comments" });
+    for (const comment of conversation.comments) {
+      const who = comment.author.handle ? `@${comment.author.handle}` : comment.author.name;
+      comments.append(el("div", { class: "comment" },
+        el("div", { class: "comment-head" }, el("b", { text: who }), el("span", { text: commentWhen(comment.at) })),
+        el("p", { text: comment.text })));
+    }
+    if (!conversation.comments.length) comments.append(el("p", { class: "lede", text: "No comments yet." }));
+    commentList.append(comments);
+  } else {
+    count.append(el("span", { class: "chip", text: working ? "Reading" : "Not read" }));
+  }
+
+  const textarea = el("textarea", { maxlength: "1000", placeholder: "Leave a comment", "aria-label": "Comment" });
+  const form = el("div", { class: "comment-form" }, textarea,
+    el("div", { class: "row" }, el("button", {
+      class: "btn small", type: "button", disabled: working,
+      onclick: () => postComment(id, textarea), text: "Post",
+    })));
+  commentAction.append(form);
+  const line = socialProblem(problem);
+  if (line) commentAction.append(line);
+}
+
+function acceptSocial(id, reply) {
+  if (reply.state === "ok" && reply.social) {
+    farm.conversations.set(id, reply.social);
+    farm.socialTrouble.delete(id);
+    farm.social[id] = { seeds: reply.social.seeds, comments: reply.social.comments.length, stack: reply.social.stack };
+    renderCatalog();
+  } else {
+    farm.socialTrouble.set(id, { state: reply.state, message: reply.message || "That did not work." });
+    if (reply.state === "signedOut") {
+      farm.account = { configured: false, label: null };
+      renderSettings();
+    }
+  }
+  if (farm.open === id) renderCardSocial();
+}
+
+async function readCardSocial(id) {
+  if (!farm.account.configured || farm.socialWorking.has(id)) return;
+  farm.socialWorking.add(id);
+  renderCardSocial();
+  try { acceptSocial(id, await invoke("farm_social", { id })); }
+  catch (error) { farm.socialTrouble.set(id, { state: "error", message: sentence(error) }); }
+  finally { farm.socialWorking.delete(id); if (farm.open === id) renderCardSocial(); }
+}
+
+async function toggleSeed(id) {
+  if (farm.socialWorking.has(id)) return;
+  farm.socialWorking.add(id);
+  renderCardSocial();
+  try { acceptSocial(id, await invoke("farm_seed_toggle", { id })); }
+  catch (error) { farm.socialTrouble.set(id, { state: "error", message: sentence(error) }); }
+  finally { farm.socialWorking.delete(id); if (farm.open === id) renderCardSocial(); }
+}
+
+async function postComment(id, textarea) {
+  const text = textarea.value.trim();
+  if (!text) { farm.socialTrouble.set(id, { state: "error", message: "Write a comment first." }); renderCardSocial(); return; }
+  if (farm.socialWorking.has(id)) return;
+  farm.socialWorking.add(id);
+  renderCardSocial();
+  try {
+    const reply = await invoke("farm_comment", { id, text });
+    acceptSocial(id, reply);
+    if (reply.state === "ok") say("Comment posted.");
+  } catch (error) {
+    farm.socialTrouble.set(id, { state: "error", message: sentence(error) });
+  } finally {
+    farm.socialWorking.delete(id);
+    if (farm.open === id) renderCardSocial();
+  }
 }
 
 // The same two sentences the command line tool prints before it installs.
@@ -903,6 +1044,12 @@ function renderSettings() {
   $("toggle-autostart").setAttribute("aria-checked", String(farm.settings.autostart));
   $("toggle-path").setAttribute("aria-checked", String(farm.settings.farmOnPath));
   $("toggle-browser").setAttribute("aria-checked", String(farm.settings.openInBrowser));
+  $("farm-account-status").textContent = farm.account.configured
+    ? farm.account.label || "Token saved"
+    : "No farm token is saved.";
+  $("farm-token-field").hidden = farm.account.configured;
+  $("farm-token-save").hidden = farm.account.configured;
+  $("farm-token-sign-out").hidden = !farm.account.configured;
 
   const mb = (n) => `${(n / 1024 / 1024).toFixed(1)} MB`;
   const about = $("about");
@@ -922,6 +1069,38 @@ function renderSettings() {
     about.append(el("dt", { text: term }), el("dd", { text: value }));
   }
 }
+
+$("farm-token-get").addEventListener("click", () => invoke("open_external", { url: "https://tiinyapp.farm/account/" })
+  .catch((error) => say(sentence(error))));
+
+$("farm-token-save").addEventListener("click", async () => {
+  const input = $("farm-token");
+  const token = input.value.trim();
+  if (!token) { say("Paste the farm token."); return; }
+  const button = $("farm-token-save");
+  button.disabled = true;
+  try {
+    farm.account = await invoke("farm_account_save", { token });
+    input.value = "";
+    renderSettings();
+    say("Token saved.");
+    if (farm.open) readCardSocial(farm.open);
+  } catch (error) {
+    say(sentence(error));
+  } finally {
+    button.disabled = false;
+  }
+});
+
+$("farm-token-sign-out").addEventListener("click", async () => {
+  try {
+    farm.account = await invoke("farm_account_sign_out");
+    farm.conversations.clear();
+    farm.socialTrouble.clear();
+    renderSettings();
+    renderCardSocial();
+  } catch (error) { say(sentence(error)); }
+});
 
 // The same window the menu bar's About item and the tray both open. Settings
 // is where somebody goes looking for what version this is, so the credits are
@@ -1172,10 +1351,29 @@ listen("apps:changed", () => { refresh(); });
 
 listen("deep-link:install", (event) => { show("farm"); openCard(event.payload); });
 
+// The UI check loads this exact file in jsdom. The hook exists only when that
+// harness creates it before the script runs, so a shipped window has no extra
+// surface while the three social error states can still be drawn and held.
+if (window.__FARM_UI_TEST__) {
+  window.__FARM_UI_TEST__.openSocial = (row, manifest) => {
+    farm.catalog = [row];
+    farm.manifests.set(row.id, manifest);
+    openCard(row.id);
+  };
+  window.__FARM_UI_TEST__.signedIn = (conversation) => {
+    farm.account = { configured: true, label: "Token saved" };
+    farm.conversations.set(farm.open, conversation);
+    renderSettings();
+    renderCardSocial();
+  };
+  window.__FARM_UI_TEST__.socialReply = (reply) => acceptSocial(farm.open, reply);
+}
+
 // Boot ---------------------------------------------------------------------
 (async () => {
   farm.info = await invoke("launcher_info");
   farm.settings = await invoke("settings_read");
+  farm.account = await invoke("farm_account_status");
   invoke("models_watch");
   // The first look happens as the window is being built, so its event can beat
   // this listener. Asking once covers that race.

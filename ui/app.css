@@ -173,6 +173,19 @@ main { padding: 24px 20px 40px; max-width: 1180px; margin: 0 auto }
    is an answer rather than a number. */
 .seeds b.none { font: 400 12px var(--body); color: var(--mute) }
 
+.social-box { border-top: 1px solid var(--fence); padding-top: 16px }
+.social-box h3 { margin: 0 0 10px }
+.social-box h3:not(:first-child) { margin-top: 22px }
+.social-seed-head { display: flex; align-items: center; justify-content: space-between; gap: 12px }
+.social-auth { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; color: var(--mute); font-size: 14px }
+.comments { display: grid; gap: 10px }
+.comment { border: 1px solid var(--fence); border-radius: 12px; padding: 10px 12px; background: color-mix(in srgb, var(--soil) 65%, transparent) }
+.comment-head { display: flex; justify-content: space-between; gap: 12px; color: var(--mute); font-size: 12px; margin-bottom: 5px }
+.comment p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere }
+.comment-form { display: grid; gap: 9px; margin-top: 10px }
+.comment-form textarea { min-height: 82px; resize: vertical }
+.social-error { color: var(--bad); font-size: 14px; margin: 8px 0 0 }
+
 /* A row in the Running pane ------------------------------------------- */
 .rows { display: grid; gap: 12px }
 .approw {

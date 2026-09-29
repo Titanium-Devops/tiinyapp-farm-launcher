@@ -12,6 +12,7 @@ pub mod engine;
 pub mod models;
 pub mod progress;
 pub mod settings;
+pub mod social;
 pub mod state;
 pub mod tray;
 pub mod trouble;
@@ -1137,6 +1138,46 @@ async fn social_counts(ids: Vec<String>) -> BTreeMap<String, catalog::Social> {
 }
 
 #[tauri::command]
+fn farm_account_status(app: tauri::State<'_, Launcher>) -> social::Account {
+    social::account(&app.engine.config_dir())
+}
+
+#[tauri::command]
+async fn farm_account_save(
+    app: tauri::State<'_, Launcher>,
+    token: String,
+) -> Result<social::Account, String> {
+    social::save(&app.engine.config_dir(), token).await
+}
+
+#[tauri::command]
+fn farm_account_sign_out(app: tauri::State<'_, Launcher>) -> Result<social::Account, String> {
+    social::sign_out(&app.engine.config_dir())
+}
+
+#[tauri::command]
+async fn farm_social(app: tauri::State<'_, Launcher>, id: String) -> Result<social::Reply, String> {
+    social::detail(&app.engine.config_dir(), &id).await
+}
+
+#[tauri::command]
+async fn farm_seed_toggle(
+    app: tauri::State<'_, Launcher>,
+    id: String,
+) -> Result<social::Reply, String> {
+    social::toggle(&app.engine.config_dir(), &id).await
+}
+
+#[tauri::command]
+async fn farm_comment(
+    app: tauri::State<'_, Launcher>,
+    id: String,
+    text: String,
+) -> Result<social::Reply, String> {
+    social::comment(&app.engine.config_dir(), &id, text).await
+}
+
+#[tauri::command]
 fn settings_read(app: tauri::State<'_, Launcher>) -> Settings {
     app.settings.lock().map(|s| s.clone()).unwrap_or_default()
 }
@@ -1497,6 +1538,12 @@ pub fn run() {
             catalog_marks,
             card_seen,
             social_counts,
+            farm_account_status,
+            farm_account_save,
+            farm_account_sign_out,
+            farm_social,
+            farm_seed_toggle,
+            farm_comment,
             update_pending,
             update_dismiss,
             update_install,
