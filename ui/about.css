@@ -139,6 +139,9 @@ body.about {
 .ico.mini:active { transform: translateY(1px) }
 .ico.mini .glyph { width: 16px; height: 16px }
 
+.agent-help p { margin: 0 2px 8px; color: var(--mute); font-size: 11.5px; line-height: 1.45 }
+.agent-help button { padding: 0; border: 0; background: none; color: var(--cyan); font: inherit; text-decoration: underline; cursor: pointer }
+
 /* What you can do from here ------------------------------------------- */
 .foot {
   flex: none;
