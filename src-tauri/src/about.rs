@@ -46,6 +46,9 @@ pub const ALLOWED: &[&str] = &[
     // Part of
     "https://tiinyapp.farm",
     "https://titanium.bot",
+    // Agent support
+    "https://tiinyapp.farm/support/llms.txt",
+    "https://tiinyapp.farm/support/agent.md",
     // Source
     "https://github.com/Titanium-Devops/tiinyapp-farm-launcher",
     "https://github.com/Titanium-Devops/tiinyapp-farm-launcher/blob/main/LICENSE",
@@ -166,7 +169,7 @@ mod tests {
                 "{url} is in the list twice"
             );
         }
-        assert_eq!(ALLOWED.len(), 8, "a link added or taken away is a change to what this window says about who made the launcher, so it is said out loud here");
+        assert_eq!(ALLOWED.len(), 10, "a link added or taken away is a change to what this window says about who made the launcher, so it is said out loud here");
     }
 
     #[test]
